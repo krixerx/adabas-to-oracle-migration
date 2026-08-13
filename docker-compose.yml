@@ -1,0 +1,93 @@
+# Adabas -> Oracle migration lab.
+# Everything runs on the internal network; no internet needed after image pulls.
+#
+# DUPLICATED in the sibling repo (oracle-to-adabas-sync) with a different project
+# name, container prefix and service set. If you change something structural here,
+# check whether the other one needs it too.
+#
+# PORTS: 60001, 8190, 2700 and 1521 are published. The sibling repo publishes the
+# same ones. Stop one lab before starting the other.
+
+name: a2o
+
+services:
+
+  adabas:
+    image: softwareag/adabas-ce:7.4.0
+    container_name: a2o-adabas
+    hostname: a2o-adabas   # fixed: nucleus writes a host-bound lock (/data/db001/_DB_LOCK);
+                           # a recreated container with a random hostname trips ADANUC-F-CONCURRLOCKHOST
+    environment:
+      ACCEPT_EULA: "Y"
+      ADABAS_ADMIN_USER: admin      # REST service credentials (spike finding)
+      ADABAS_ADMIN_PWD: manage
+      # Demo DB: DBID 001, created by crdemodb on first start (default ADABAS_DB_CREATION=demodb)
+    ports:
+      - "60001:60001"   # Adabas TCP
+      - "8190:8190"     # Adabas REST server (built into adabas-ce)
+    volumes:
+      - adabas-data:/data
+    networks: [a2o]
+
+  natural:
+    image: softwareag/natural-ce:9.3.3
+    container_name: a2o-natural
+    environment:
+      ACCEPT_EULA: "Y"
+    depends_on: [adabas]
+    ports:
+      - "2700:2700"     # Natural development server for NaturalONE
+    volumes:
+      - ./natural:/poc/natural:ro   # extract program sources (host-edited)
+      - ./data:/poc/data            # work-file output -> extract CSVs land here
+    networks: [a2o]
+
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: a2o-oracle
+    environment:
+      ORACLE_PASSWORD: PocSysPwd1
+      APP_USER: pocapp
+      APP_USER_PASSWORD: pocapp
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./oracle-init:/container-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+    networks: [a2o]
+
+  # One-shot Hop runner: not started by `up`; migrate.cmd uses `docker compose run --rm hop-run`
+  hop-run:
+    image: apache/hop:latest
+    profiles: ["tools"]
+    depends_on:
+      oracle:
+        condition: service_healthy
+    environment:
+      HOP_PROJECT_FOLDER: /poc/hop
+      HOP_PROJECT_NAME: a2o
+      HOP_FILE_PATH: ${HOP_FILE_PATH:-/poc/hop/workflows/migrate-all.hwf}
+      HOP_RUN_CONFIG: local
+      HOP_LOG_LEVEL: Basic
+      ORACLE_HOST: oracle   # Hop resolves ${ORACLE_HOST} in the connection metadata; host GUI users set ORACLE_HOST=localhost
+    volumes:
+      - ./hop:/poc/hop
+      - ./data:/poc/data
+      # ojdbc11.jar is NOT in this repo (Oracle OTN licence) - see README
+      # "Prerequisites". migrate.cmd checks it exists before starting the lab,
+      # because Docker would otherwise create a DIRECTORY with this name.
+      - ./hop/lib/ojdbc11.jar:/opt/hop/lib/jdbc/ojdbc11.jar:ro
+    networks: [a2o]
+
+volumes:
+  adabas-data:
+  oracle-data:
+
+networks:
+  a2o:
