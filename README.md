@@ -14,7 +14,7 @@ migrate.cmd
 It ends with **`VERIFIED: 5/5`** when every migrated table's row count matches its
 expected-count rule.
 
-> **The other direction lives in a sibling repo:** [`oracle-to-adabas-sync`](../oracle-to-adabas-sync)
+> **The other direction lives in a sibling repo:** [`oracle-to-adabas-sync`](https://github.com/krixerx/oracle-to-adabas-sync)
 > — Oracle → Adabas log-based change synchronisation, writing back *through* Natural
 > business logic. This repo is the bulk load; that one is the ongoing sync.
 
