@@ -75,10 +75,21 @@ services:
       HOP_FILE_PATH: ${HOP_FILE_PATH:-/poc/hop/workflows/migrate-all.hwf}
       HOP_RUN_CONFIG: local
       HOP_LOG_LEVEL: Basic
-      ORACLE_HOST: oracle   # Hop resolves ${ORACLE_HOST} in the connection metadata; host GUI users set ORACLE_HOST=localhost
+      # ${ORACLE_HOST} in the connection metadata is supplied by a Hop ENVIRONMENT, not by
+      # an OS variable and not by a project variable:
+      #   - a plain OS env var is NOT picked up as a Hop variable in this image - it stays
+      #     the literal string "${ORACLE_HOST}" and fails with ORA-17868;
+      #   - a project variable in hop/project-config.json DOES win, but it wins on both
+      #     sides at once, so whichever value it holds breaks the other side (the host GUI
+      #     needs localhost, the container needs oracle). An environment variable does NOT
+      #     override a project variable - tested 2026-08-16, opposite of what was assumed.
+      # Hence one environment file per side: hop-env-docker.json / hop-env-local-gui.json.
+      HOP_ENVIRONMENT_NAME: docker
+      HOP_ENVIRONMENT_CONFIG_FILE_NAME_PATHS: /poc/hop-env-docker.json
     volumes:
       - ./hop:/poc/hop
       - ./data:/poc/data
+      - ./hop-env-docker.json:/poc/hop-env-docker.json:ro
       # ojdbc11.jar is NOT in this repo (Oracle OTN licence) - see README
       # "Prerequisites". migrate.cmd checks it exists before starting the lab,
       # because Docker would otherwise create a DIRECTORY with this name.

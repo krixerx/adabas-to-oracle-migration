@@ -1,0 +1,7 @@
+{
+  "variables" : [ {
+    "name" : "ORACLE_HOST",
+    "value" : "oracle",
+    "description" : "Oracle hostname for runs INSIDE Docker: the compose service name, resolved by Docker's DNS on the a2o network. Mounted into the hop-run container and applied via HOP_ENVIRONMENT_CONFIG_FILE_NAME_PATHS. The host-side counterpart is hop-env-local-gui.json (localhost). Neither value may live in hop/project-config.json: a project variable beats an environment variable, so a project default would silently win on BOTH sides and break one of them."
+  } ]
+}

@@ -83,13 +83,17 @@ directory. Then register this folder's `hop\` as a Hop project named **`a2o`**.
 (defaulting to `C:\hop` if unset) and launches `hop-gui.bat` from there. In the
 GUI, pick project `a2o` if it isn't selected already.
 
-⚠️ **`ORACLE_HOST` needs the `local-gui` environment, not just the variable.**
-Inside Docker the hostname is `oracle`; from your PC it is `localhost`. Setting
-`ORACLE_HOST=localhost` as an OS variable is **not enough** — Hop *project*
-variables override OS environment variables, so the project default `oracle`
-wins and every GUI run fails with ORA-12541. Select the `local-gui` environment
-(from `hop-env-local-gui.json`) once; that is the only layer that beats a
-project default, and Hop remembers the project+environment pair across restarts.
+⚠️ **`ORACLE_HOST` comes from the `local-gui` environment — select it once.**
+Inside Docker the hostname is `oracle`; from your PC it is `localhost`. The value
+therefore lives in a Hop **environment** on each side — `hop-env-local-gui.json`
+(`localhost`, this GUI) and `hop-env-docker.json` (`oracle`, mounted into the
+container) — and **not** in `hop\project-config.json`, because a *project*
+variable beats an *environment* variable and would win on both sides at once,
+breaking one of them. Select `local-gui` once via the environment icons; Hop
+remembers the project+environment pair across restarts. Without it the GUI
+resolves nothing usable and every run and **preview** dies with ORA-17868
+(`Unknown host specified`). Setting `ORACLE_HOST` as an OS variable is not a
+substitute — the container ignores it entirely.
 
 ### Things to try in the GUI
 
@@ -224,7 +228,10 @@ Oracle. This is the clean-slate button — first start takes a few minutes again
 | Extract fails with Adabas response **48/8** | Stale ET user from an aborted session: `docker exec a2o-adabas adaopr db=1 display=uq` to find it, `adaopr db=1 stop=<id>`; or just retry — each run uses a unique `etid`. |
 | Adabas container aborts, log shows `CONCURRLOCKHOST` | Host-bound lock in the volume: `docker compose down`, then delete `/data/db001/_DB_LOCK` via a temp container, or `docker compose down -v` (nukes data — full rerun rebuilds). |
 | Hop load fails with **ORA-00001** (unique constraint) | Tables weren't cleared before loading — run `scripts\clear-tables.ps1`, then re-run the Hop step. `migrate.cmd` normally does this for you. |
-| Hop GUI can't reach Oracle | You forgot `set ORACLE_HOST=localhost` before `hop-gui.bat`, or the GUI's `lib\jdbc` lacks `ojdbc11.jar`. |
+| Hop GUI can't reach Oracle — **ORA-17868 `Unknown host specified: oracle`** on run *or* preview | The `local-gui` environment isn't active, so `${ORACLE_HOST}` fell through to a Docker-internal name your PC can't resolve. Select `local-gui` via the environment icons (left panel). Check too that `hop\project-config.json` has **no** `ORACLE_HOST` variable — a project variable overrides the environment and re-breaks this. |
+| Hop GUI can't reach Oracle (other errors) | The GUI's `lib\jdbc` lacks `ojdbc11.jar`, or the Oracle container is down (`docker ps`). |
+| Container run fails with **ORA-17868 `${ORACLE_HOST}`** (the literal string) | The `hop-env-docker.json` mount or the `HOP_ENVIRONMENT_*` variables are missing from the `hop-run` service in `docker-compose.yml`. An OS env var alone does not work — the image does not turn it into a Hop variable. |
+| **Hop GUI opens the `samples` project instead of `a2o`** | The GUI reopens whatever the *newest* `*-open.event` in `%HOP_HOME%\audit\projects\project\` names (environment likewise in `...\audit\projects\environment\`), and falls back to `samples` when that name is unknown or the event is unreadable. Fastest fix: pick `a2o` once via the diamond icons in the left panel — Hop then records it and reopens it from then on. Editing it by hand works too, but only with the GUI **closed** (it rewrites config and audit on exit) and only as **BOM-less UTF-8** (PowerShell 5.1 `-Encoding utf8` adds a BOM → the event is silently discarded). `defaultProject` in `hop-config.json`, `last-projects.list`, and `HOP_PROJECT_NAME` do **not** control this — the last is Hop Web only. |
 | First run very slow / oracle unhealthy | Normal on first start (Oracle initializes ~2–4 min). `docker compose logs -f oracle` to watch. |
 | Reconcile says manifest/CSV mismatch | You hand-edited a CSV (fine for experiments) — run a full `migrate.cmd` to regenerate. |
 

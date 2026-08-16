@@ -71,11 +71,17 @@ Most breakage here is a half-applied change across files that share one fact.
 
 Each of these has a comment at the site explaining it; do not "clean up" the comment.
 
-- **`ORACLE_HOST` in `hop/project-config.json` must stay `oracle`.** Hop *project
-  variables override OS environment variables*, so a host-friendly `localhost` there
-  silently defeats compose and every container run dies with ORA-12541. The host GUI
-  overrides it through the `local-gui` **environment** (`hop-env-local-gui.json`) — the only
-  layer that wins over a project default. This exact bug shipped once and broke every run.
+- **`ORACLE_HOST` must NOT be a project variable.** It is supplied by a Hop **environment**,
+  one per side: `hop-env-docker.json` (`oracle`, mounted into the container and named by
+  `HOP_ENVIRONMENT_*` in compose) and `hop-env-local-gui.json` (`localhost`, the `local-gui`
+  environment the desktop GUI selects). The measured layering, 2026-08-16:
+  **a project variable beats an environment variable** — the opposite of what this file
+  claimed until then. So a project default wins on *both* sides at once, and whichever value
+  it holds breaks the other side: `oracle` makes every GUI run/preview fail with ORA-17868,
+  `localhost` makes every container run fail with ORA-12541. Both failures have now happened
+  here. A plain OS environment variable is no substitute either — the `apache/hop` container
+  never picks it up as a Hop variable and the connection URL keeps the literal
+  `${ORACLE_HOST}`. If you add another host-dependent setting, give it the same treatment.
 - **`hop/lib/ojdbc11.jar` is not in the repo** (Oracle OTN licence) and is bind-mounted as a
   *file*. If missing, Docker creates a **directory** with that name and Hop fails obscurely.
   `migrate.cmd` preflights both cases; keep that check.
