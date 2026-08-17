@@ -274,6 +274,36 @@ Step 5 is the one that matters. Steps 1–4 show correlation; only changing the 
 watching the output follow proves **causality** — that the CSV is a projection of Adabas
 and not a file someone once saved. The script fails loudly if the value does not change.
 
+### Why the extract is not a step inside the Hop workflow
+
+A fair question when you look at `migrate-all.hwf`: why does Hop not run the extract
+itself? Because the Natural runtime lives in a *different container*, and the Hop image
+has no Docker CLI — a `shell` action there cannot reach `a2o-natural` without mounting
+the Docker socket into the ETL container and adding a CLI binary. That is a privileged
+dependency and a new offline prerequisite, bought for a demo convenience.
+
+It is also not how the real thing works. In production the extract is a mainframe job
+(Natural under JCL) and Hop runs on Linux; Hop would never `docker exec` anything. It
+waits for the contract files, or is started by the scheduler that ran the extract.
+
+So the workflow does the production-faithful thing instead: its **first action is a gate**,
+`Adabas extract output present?`, which checks all four contract files and aborts with a
+usable message if they are missing. The extract is therefore *visible* on the canvas as
+where the flow begins, without pretending Hop performed it. Try it:
+
+```bat
+ren dataehicles.csv vehicles.csv.bak
+docker compose run --rm hop-run          :: aborts immediately, tells you to extract
+ren dataehicles.csv.bak vehicles.csv
+```
+
+Without the gate that same mistake surfaces as a file-not-found four transforms deep.
+
+If you *do* want Hop to trigger the extract, the honest options are: mount
+`/var/run/docker.sock` plus a Docker CLI into the `hop-run` service and use a `shell`
+action; or run a small trigger service in the Natural container and call it with Hop's
+`http` action. Both work; neither is worth it here.
+
 If you want one more beat, stop the database and watch the extract fail:
 
 ```bat

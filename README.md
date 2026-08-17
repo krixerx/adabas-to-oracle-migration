@@ -174,7 +174,8 @@ natural/                     extract programs (EXTRVEH, EXTRFIN), the lab data s
 hop/pipelines/               10 vehicle (de-duplicate) · 20 vehicle_plate (+ rejects) ·
                              30 traffic_fine (plate → vehicle) · 40 offences (MU) ·
                              50 payments (PE)
-hop/workflows/               migrate-all.hwf — runs them in dependency order
+hop/workflows/               migrate-all.hwf — gates on the extract output, then runs
+                             the pipelines in dependency order
 scripts/                     extract · clear-tables · reconcile · lab-up · seed-source ·
                              make-sample-data
 data/                        extract output lands here (gitignored)

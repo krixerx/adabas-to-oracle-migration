@@ -177,6 +177,12 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
 - **Adabas writes a host-bound lock** (`/data/db001/_DB_LOCK`). Compose pins
   `hostname: a2o-adabas`; an unclean stop leaves a stale lock and the container then exits 0
   looking healthy. That is why `lab-up.ps1` exists.
+- **The extract is deliberately NOT a Hop action.** The Natural runtime is in another
+  container and the Hop image has no Docker CLI, so a `shell` action cannot reach it
+  without a Docker-socket mount. It is also not production-faithful - a real extract is a
+  mainframe job. `migrate-all.hwf` instead opens with a `FILES_EXIST` gate that aborts
+  with a usable message when the contract files are missing; do not "fix" this by adding
+  a shell action.
 - **Clear with `DELETE`, child-first — never `TRUNCATE`** (ORA-02266 against enabled FKs,
   even with empty children).
 - **`ADADBM ADD_FIELDS` takes its field definitions as parameter lines** ending in
