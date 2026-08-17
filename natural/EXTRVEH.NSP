@@ -9,6 +9,9 @@ DEFINE DATA LOCAL
   2 MODEL
   2 COLOR
   2 YEAR
+  2 VIN
+  2 VEH-TYPE
+  2 FUEL-DESC
 1 #ISN (N10)
 1 #F (A) DYNAMIC
 1 #LINE (A) DYNAMIC
@@ -21,7 +24,10 @@ END-DEFINE
 DEFINE WORK FILE 6 '/poc/data/vehicles.csv' TYPE 'ASCII'
 DEFINE WORK FILE 7 '/poc/data/counts_veh.txt' TYPE 'ASCII'
 *
-COMPRESS 'isn,reg_num,personnel_id,make,model,color,year_built'
+* VIN is written EXACTLY as stored - suffix and all. Splitting it into base VIN
+* and suffix is a mapping decision, so it belongs in Hop, not here.
+COMPRESS 'isn,plate_no,personnel_id,make,model,color,year_built,vin,'
+  'veh_type,fuel_desc'
   INTO #LINE LEAVING NO SPACE
 WRITE WORK FILE 6 VARIABLE #LINE
 *
@@ -42,6 +48,14 @@ READ V BY ISN
   COMPRESS COLOR INTO #F LEAVING NO SPACE
   PERFORM APPEND-F
   COMPRESS YEAR INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS VIN INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS VEH-TYPE INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+* written verbatim, mixed case and punctuation intact - normalising it is a
+* mapping decision and happens in JavaScript, not here
+  COMPRESS FUEL-DESC INTO #F LEAVING NO SPACE
   PERFORM APPEND-F
   WRITE WORK FILE 6 VARIABLE #LINE
   ADD 1 TO #CNT-VEH

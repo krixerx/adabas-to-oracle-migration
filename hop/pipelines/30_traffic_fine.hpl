@@ -1,0 +1,626 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TRAFFIC FINES -> POCAPP.TRAFFIC_FINE.
+
+  The source records the PLATE the camera read, never the vehicle. Resolving it
+  is this pipeline's main job, and it is why the plate table exists: a fine
+  written against plate '90000019' has to land on the same vehicle as one
+  written against plate '537MN75' - they are the same car under two
+  registrations.
+
+  A plate that matches nothing is not an error and not a reason to drop the
+  fine - foreign and long-deregistered vehicles are a permanent feature of this
+  data. Those rows load with vehicle_id NULL AND get a MIGRATION_REJECT entry,
+  so they are visible rather than quietly orphaned. That is why the lookup
+  transform COPIES its rows to both branches (distribute = N) instead of
+  distributing them.
+
+  Runs after 20 because it looks vehicles up through VEHICLE_PLATE.
+-->
+<pipeline>
+  <info>
+    <name>30_traffic_fine</name>
+    <name_sync_with_filename>Y</name_sync_with_filename>
+    <description>TRAFFIC FINES -> POCAPP.TRAFFIC_FINE: resolve the plate to a vehicle, convert the date, resolve the status code</description>
+    <extended_description/>
+    <pipeline_version/>
+    <pipeline_type>Normal</pipeline_type>
+    <parameters>
+    </parameters>
+    <capture_transform_performance>N</capture_transform_performance>
+    <transform_performance_capturing_delay>1000</transform_performance_capturing_delay>
+    <transform_performance_capturing_size_limit>100</transform_performance_capturing_size_limit>
+    <created_user>-</created_user>
+    <created_date>2026/08/17 12:00:00.000</created_date>
+    <modified_user>-</modified_user>
+    <modified_date>2026/08/17 12:00:00.000</modified_date>
+  </info>
+  <notepads>
+  </notepads>
+  <order>
+    <hop>
+      <from>read traffic_fines.csv</from>
+      <to>convert offence date</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>convert offence date</from>
+      <to>resolve vehicle_id</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>resolve vehicle_id</from>
+      <to>add lookup domain</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>add lookup domain</from>
+      <to>resolve status</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>resolve status</from>
+      <to>TRAFFIC_FINE</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>resolve status</from>
+      <to>unresolved plate</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>unresolved plate</from>
+      <to>reject reason</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>unresolved plate</from>
+      <to>matched a vehicle</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>reject reason</from>
+      <to>describe orphan fine</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>describe orphan fine</from>
+      <to>MIGRATION_REJECT</to>
+      <enabled>Y</enabled>
+    </hop>
+  </order>
+  <transform>
+    <name>read traffic_fines.csv</name>
+    <type>CSVInput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <filename>${DATA_DIR}/traffic_fines.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
+    <enclosure>"</enclosure>
+    <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>N</newline_possible>
+    <encoding>UTF-8</encoding>
+    <schemaDefinition/>
+    <fields>
+      <field>
+        <name>isn</name>
+        <type>Integer</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>fine_no</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>plate_no</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>offence_yyyymmdd</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>location</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>amount</name>
+        <type>BigNumber</type>
+        <format/>
+        <currency/>
+        <decimal>.</decimal>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>status</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>offender_national_id</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>112</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>convert offence date</name>
+    <type>SelectValues</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <fields>
+      <select_unspecified>N</select_unspecified>
+      <meta>
+        <name>offence_yyyymmdd</name>
+        <rename>offence_date</rename>
+        <type>Date</type>
+        <length>-2</length>
+        <precision>-2</precision>
+        <storage_type/>
+        <conversion_mask>yyyyMMdd</conversion_mask>
+        <date_format_lenient>N</date_format_lenient>
+        <date_format_locale/>
+        <date_format_timezone/>
+        <lenient_string_to_number>N</lenient_string_to_number>
+        <decimal_symbol/>
+        <grouping_symbol/>
+        <currency_symbol/>
+        <encoding/>
+      </meta>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>272</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>resolve vehicle_id</name>
+    <type>DBLookup</type>
+    <description>Plate -> vehicle. No match is normal: foreign or deregistered vehicles.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <cache>Y</cache>
+    <cache_load_all>Y</cache_load_all>
+    <cache_size>5000</cache_size>
+    <lookup>
+      <schema>POCAPP</schema>
+      <table>VEHICLE_PLATE</table>
+      <orderby/>
+      <fail_on_multiple>N</fail_on_multiple>
+      <eat_row_on_failure>N</eat_row_on_failure>
+      <key>
+        <name>plate_no</name>
+        <field>PLATE_NO</field>
+        <condition>=</condition>
+        <name2/>
+      </key>
+      <value>
+        <name>VEHICLE_ID</name>
+        <rename>vehicle_id</rename>
+        <default/>
+        <type>BigNumber</type>
+        <trim_type>none</trim_type>
+      </value>
+    </lookup>
+    <attributes/>
+    <GUI>
+      <xloc>432</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>add lookup domain</name>
+    <type>Constant</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <fields>
+      <field>
+        <currency/>
+        <decimal/>
+        <format/>
+        <group/>
+        <length>-1</length>
+        <name>lookup_domain</name>
+        <nullif>FINE_STATUS</nullif>
+        <precision>-1</precision>
+        <set_empty_string>N</set_empty_string>
+        <type>String</type>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>592</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>resolve status</name>
+    <type>DBLookup</type>
+    <description>Rows are COPIED from here (distribute = N): every fine loads, and the unmatched ones are additionally reported.</description>
+    <distribute>N</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <cache>Y</cache>
+    <cache_load_all>Y</cache_load_all>
+    <cache_size>500</cache_size>
+    <lookup>
+      <schema>POCAPP</schema>
+      <table>CODE_LOOKUP</table>
+      <orderby/>
+      <fail_on_multiple>N</fail_on_multiple>
+      <eat_row_on_failure>N</eat_row_on_failure>
+      <key>
+        <name>lookup_domain</name>
+        <field>DOMAIN</field>
+        <condition>=</condition>
+        <name2/>
+      </key>
+      <key>
+        <name>status</name>
+        <field>CODE</field>
+        <condition>=</condition>
+        <name2/>
+      </key>
+      <value>
+        <name>DESCRIPTION</name>
+        <rename>status_desc</rename>
+        <default>Unknown</default>
+        <type>String</type>
+        <trim_type>none</trim_type>
+      </value>
+    </lookup>
+    <attributes/>
+    <GUI>
+      <xloc>752</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>unresolved plate</name>
+    <type>FilterRows</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <send_true_to>reject reason</send_true_to>
+    <send_false_to>matched a vehicle</send_false_to>
+    <compare>
+      <condition>
+        <negated>N</negated>
+        <leftvalue>vehicle_id</leftvalue>
+        <function>IS NULL</function>
+        <rightvalue/>
+      </condition>
+    </compare>
+    <attributes/>
+    <GUI>
+      <xloc>912</xloc>
+      <yloc>256</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>matched a vehicle</name>
+    <type>Dummy</type>
+    <description>Already loaded by TRAFFIC_FINE; nothing more to do with them.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <attributes/>
+    <GUI>
+      <xloc>912</xloc>
+      <yloc>384</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>reject reason</name>
+    <type>Constant</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <fields>
+      <field>
+        <currency/>
+        <decimal/>
+        <format/>
+        <group/>
+        <length>-1</length>
+        <name>source_file</name>
+        <nullif>traffic_fines.csv</nullif>
+        <precision>-1</precision>
+        <set_empty_string>N</set_empty_string>
+        <type>String</type>
+      </field>
+      <field>
+        <currency/>
+        <decimal/>
+        <format/>
+        <group/>
+        <length>-1</length>
+        <name>reason</name>
+        <nullif>plate matches no registered vehicle</nullif>
+        <precision>-1</precision>
+        <set_empty_string>N</set_empty_string>
+        <type>String</type>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>1072</xloc>
+      <yloc>256</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>TRAFFIC_FINE</name>
+    <type>TableOutput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <schema>POCAPP</schema>
+    <table>TRAFFIC_FINE</table>
+    <commit>1000</commit>
+    <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>Y</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields>
+      <field>
+        <column_name>SOURCE_ISN</column_name>
+        <stream_name>isn</stream_name>
+      </field>
+      <field>
+        <column_name>FINE_NO</column_name>
+        <stream_name>fine_no</stream_name>
+      </field>
+      <field>
+        <column_name>VEHICLE_ID</column_name>
+        <stream_name>vehicle_id</stream_name>
+      </field>
+      <field>
+        <column_name>PLATE_NO</column_name>
+        <stream_name>plate_no</stream_name>
+      </field>
+      <field>
+        <column_name>OFFENCE_DATE</column_name>
+        <stream_name>offence_date</stream_name>
+      </field>
+      <field>
+        <column_name>LOCATION</column_name>
+        <stream_name>location</stream_name>
+      </field>
+      <field>
+        <column_name>AMOUNT</column_name>
+        <stream_name>amount</stream_name>
+      </field>
+      <field>
+        <column_name>STATUS_CODE</column_name>
+        <stream_name>status</stream_name>
+      </field>
+      <field>
+        <column_name>STATUS</column_name>
+        <stream_name>status_desc</stream_name>
+      </field>
+      <field>
+        <column_name>OFFENDER_NATIONAL_ID</column_name>
+        <stream_name>offender_national_id</stream_name>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>912</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>describe orphan fine</name>
+    <type>ScriptValueMod</type>
+    <description>Name the fine and the plate, so the reject row stands on its own.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <optimizationLevel>9</optimizationLevel>
+    <jsScripts>
+      <jsScript>
+        <jsScript_type>0</jsScript_type>
+        <jsScript_name>describe_orphan_fine</jsScript_name>
+        <jsScript_script>
+// Two very different situations end up here and the row has to say which:
+// a foreign or long-deregistered plate that was never in the vehicle file, and
+// a plate this migration itself refused to load as a surplus 4th registration.
+// Whoever reads MIGRATION_REJECT cannot tell them apart from the plate alone.
+var detail = "fine " + String(fine_no) + " on plate " + String(plate_no);
+</jsScript_script>
+      </jsScript>
+    </jsScripts>
+    <fields>
+      <field>
+        <name>detail</name>
+        <rename>detail</rename>
+        <type>String</type>
+        <length>200</length>
+        <precision>-1</precision>
+        <replace>N</replace>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>1232</xloc>
+      <yloc>256</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>MIGRATION_REJECT</name>
+    <type>TableOutput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <schema>POCAPP</schema>
+    <table>MIGRATION_REJECT</table>
+    <commit>1000</commit>
+    <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>Y</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields>
+      <field>
+        <column_name>SOURCE_FILE</column_name>
+        <stream_name>source_file</stream_name>
+      </field>
+      <field>
+        <column_name>SOURCE_ISN</column_name>
+        <stream_name>isn</stream_name>
+      </field>
+      <field>
+        <column_name>REASON</column_name>
+        <stream_name>reason</stream_name>
+      </field>
+      <field>
+        <column_name>DETAIL</column_name>
+        <stream_name>detail</stream_name>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>1392</xloc>
+      <yloc>256</yloc>
+    </GUI>
+  </transform>
+  <attributes/>
+</pipeline>

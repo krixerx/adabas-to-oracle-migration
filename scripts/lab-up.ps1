@@ -43,3 +43,10 @@ docker ps --filter "name=a2o" --format "table {{.Names}}\t{{.Status}}"
 # even though the container may look alive.
 $nuc = docker logs --since 5m a2o-adabas 2>&1 | Select-String "DBSTART|CONCURRLOCK|ABORTED"
 if ($nuc) { Write-Host "`nAdabas nucleus:"; $nuc | ForEach-Object { Write-Host "  $_" } }
+
+# The CE demo database has no VIN, no vehicle-type field and no traffic-fine
+# file, so the source this lab migrates has to be manufactured in Adabas first.
+# Idempotent, and required after every `docker compose down -v`.
+Write-Host "`nLab data preparation (vehicles + traffic fines):"
+& (Join-Path $PSScriptRoot "seed-source.ps1")
+if ($LASTEXITCODE -ne 0) { throw "seed-source.ps1 failed" }

@@ -20,4 +20,14 @@ G 1 CD CAR-DETAILS
 G 1 AK CURRENCY-INFO                                 
   2 AL CURR-CODE                         A    3  N   
 M 2 AM MAINT-COST                        P  7.0  N   
+  1 BA VIN                               A   25  N   
+*      ADDED BY scripts\seed-source.ps1 (ADADBM ADD_FIELDS)
+*      A25, NOT A17: the legacy plate workaround appends a
+*      character past position 17 - see SEEDVEH.NSP
+  1 BB VEH-TYPE                          A    8  N   
+*      LEGACY/CUSTOM TYPE CODE, MAPPED TO A STANDARD ONE IN HOP
+  1 BC FUEL-DESC                         A   20  N   
+*      FREE TEXT, 30 YEARS OF IT - 'PETROL' 'petrol' 'BENZIN'
+*      'ELEC.' 'PLUG-IN HYBRID' 'N/A' AND BLANK. NORMALISED IN
+*      JAVASCRIPT, AND ONLY CONSULTED WHEN THE VIN CANNOT SAY.
 ******DDM OUTPUT TERMINATED******

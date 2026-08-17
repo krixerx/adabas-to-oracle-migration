@@ -1,18 +1,19 @@
 # Clears the migrated target tables before a (re)load - DELETE in child-first
 # order so FK constraints stay enabled (Oracle raises ORA-02266 on TRUNCATE of a
 # parent referenced by an enabled FK, even with empty children).
-# Lookup/seed tables (CODE_LOOKUP) are never cleared.
+# Lookup/seed tables (CODE_LOOKUP, VEHICLE_TYPE, VEHICLE_TYPE_MAP) are never cleared.
 $ErrorActionPreference = "Stop"
 $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 $sql = @"
 WHENEVER SQLERROR EXIT SQL.SQLCODE
 SET FEEDBACK OFF
-DELETE FROM pocapp.employee_address_line;
-DELETE FROM pocapp.employee_language;
-DELETE FROM pocapp.employee_income;
+DELETE FROM pocapp.traffic_fine_offence;
+DELETE FROM pocapp.traffic_fine_payment;
+DELETE FROM pocapp.traffic_fine;
+DELETE FROM pocapp.vehicle_plate;
+DELETE FROM pocapp.migration_reject;
 DELETE FROM pocapp.vehicle;
-DELETE FROM pocapp.employee;
 COMMIT;
 EXIT;
 "@

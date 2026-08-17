@@ -13,72 +13,94 @@ quoting, NULL convention) after EBCDIC→UTF-8 conversion.
 - One file per **source shape** (Adabas record type or MU/PE repeating group).
 - MU/PE-group files carry `parent_key` (= Adabas ISN of the owning record, `*ISN`)
   and `occurrence_index` (1-based).
+- Numeric dates are written as `YYYYMMDD` strings; conversion to a real date is a
+  mapping decision and happens in Hop.
+- Amounts carry an explicit decimal point (`25.00`). Adabas stores them packed with no
+  decimal position of its own, so the extract applies the edit mask — without it
+  `COMPRESS` writes `2500` and the value is silently a hundred times too big.
 - Alongside the CSVs the extractor reports per-file record counts; the orchestrator
   writes them to `data/manifest.json`.
 
 ## Files (this lab scope)
 
-### employees.csv  (Adabas file EMPLOYEES, one row per record)
+### vehicles.csv  (Adabas file 12 VEHICLES, one row per record — **not** one per vehicle)
 | column | source (DDM field) | notes |
 |---|---|---|
 | isn | *ISN | Adabas ISN |
-| personnel_id | PERSONNEL-ID | A8, natural key |
-| first_name | FIRST-NAME | |
-| middle_name | MIDDLE-NAME / MIDDLE-I | verify in spike which exists |
-| last_name | NAME | |
-| mar_stat | MAR-STAT | code S/M/D/W → lookup in Hop |
-| sex | SEX | code M/F |
-| birth_yyyymmdd | BIRTH | numeric date, EDITED to YYYYMMDD; → DATE in Hop |
-| city | CITY | |
-| postal_code | ZIP / POST-CODE | verify name in spike |
-| country | COUNTRY | |
-| dept | DEPT | |
-| job_title | JOB-TITLE / CURR-TITLE | verify name in spike |
-
-### employees_address_lines.csv  (MU ADDRESS-LINE)
-| column | source |
-|---|---|
-| parent_key | *ISN of employee |
-| occurrence_index | MU occurrence (1-based) |
-| address_line | ADDRESS-LINE(i) |
-
-### employees_languages.csv  (MU LANG)
-| column | source |
-|---|---|
-| parent_key | *ISN |
-| occurrence_index | MU occurrence |
-| language_code | LANG(i), A3 |
-
-### employees_income.csv  (PE INCOME — first-level occurrences only; BONUS MU-in-PE deferred to round 2)
-| column | source |
-|---|---|
-| parent_key | *ISN |
-| occurrence_index | PE occurrence |
-| currency_code | CURR-CODE(i) |
-| salary_amount | SALARY(i), numeric |
-
-### vehicles.csv  (Adabas file VEHICLES, one row per record)
-| column | source | notes |
-|---|---|---|
-| isn | *ISN | |
-| reg_num | REG-NUM | |
-| personnel_id | PERSONNEL-ID | join key to employees |
+| plate_no | REG-NUM | the registration plate — same concept and same name as in `traffic_fines.csv` |
+| personnel_id | PERSONNEL-ID | the registered owner's national id |
 | make | MAKE | |
 | model | MODEL | |
 | color | COLOR | |
-| year_built | YEAR | verify field exists in spike; else leave empty |
+| year_built | YEAR | |
+| vin | VIN (BA) | **as stored, suffix and all** — see below |
+| veh_type | VEH-TYPE (BB) | the legacy/custom type code, mapped in Hop |
+| fuel_desc | FUEL-DESC (BC) | **free text, verbatim** — mixed case and punctuation intact |
+
+**One row per plate, not per vehicle.** The source has nowhere to record a second
+registration plate, so a vehicle with more plates was registered again under the same
+VIN with a trailing character appended (`…0000011`, `…0000012`) **and a different
+plate number in `plate_no`**. The extract writes the
+VIN **exactly as stored** — cutting it to its first 17 characters and grouping is a
+mapping decision and lives in the Hop pipelines, not in the extract. Consumers must
+therefore expect duplicate vehicles in this file.
+
+`veh_type` values are whatever the legacy application wrote (`SEDAN`, `LORRY`, `MBIKE`,
+…) and are **not** guaranteed to exist in the target's mapping table.
+
+`fuel_desc` is free text and is written **exactly as stored** — `PETROL`, `petrol`,
+`BENZIN`, `ELEC.`, `PLUG-IN HYBRID`, `HEV SELF CHG`, `N/A`, blank. Normalising it is a
+mapping decision (JavaScript, in `10_vehicle.hpl`), not the extract's job. Consumers must
+not assume it is upper-case, spelled consistently, in English, or populated at all.
+
+Note there is **no powertrain column**: the source does not hold one. EV/PHEV/HEV/PETROL
+is *derived* downstream from the VIN where the manufacturer encoded it, and from
+`fuel_desc` otherwise.
+
+### traffic_fines.csv  (Adabas file 20 TRAFFINE, one row per fine)
+| column | source | notes |
+|---|---|---|
+| isn | *ISN | |
+| fine_no | FINE-NO | business key |
+| plate_no | PLATE-NO | **the plate, not the vehicle** — see below |
+| offence_yyyymmdd | OFFENCE-DATE | numeric date; → DATE in Hop |
+| location | LOCATION | |
+| amount | AMOUNT | packed P7.2, written with the decimal point |
+| status | STATUS | code I/P/C/A → description via `CODE_LOOKUP` |
+| offender_national_id | OFFENDER-ID | |
+
+**A fine identifies a plate, never a vehicle.** Resolving `plate_no` to a vehicle is the
+migration's job, and it is why the plate table matters: a fine written against
+`90000019` belongs to the same car as one written against `537MN75`. A plate that
+matches nothing is normal — foreign and long-deregistered vehicles — and must not cause
+the fine to be dropped.
+
+### traffic_fine_offences.csv  (MU OFFENCE-CODE)
+| column | source |
+|---|---|
+| parent_key | *ISN of the fine |
+| occurrence_index | MU occurrence (1-based) |
+| offence_code | OFFENCE-CODE(i), A4 |
+
+### traffic_fine_payments.csv  (PE PAYMENT)
+| column | source |
+|---|---|
+| parent_key | *ISN of the fine |
+| occurrence_index | PE occurrence |
+| paid_yyyymmdd | PAY-DATE(i) |
+| paid_amount | PAY-AMT(i), packed P7.2 |
+| payment_method | PAY-METH(i), A2 |
 
 ## manifest.json shape
 
 ```json
 {
-  "extracted_at": "2026-08-04T18:00:00Z",
+  "extracted_at": "2026-08-17T12:00:00Z",
   "files": {
-    "employees.csv": 1107,
-    "employees_address_lines.csv": 2214,
-    "employees_languages.csv": 1800,
-    "employees_income.csv": 1500,
-    "vehicles.csv": 900
+    "vehicles.csv": 807,
+    "traffic_fines.csv": 1136,
+    "traffic_fine_offences.csv": 2271,
+    "traffic_fine_payments.csv": 682
   }
 }
 ```
@@ -86,6 +108,5 @@ quoting, NULL convention) after EBCDIC→UTF-8 conversion.
 Counts are the record counts REPORTED BY THE EXTRACT PROGRAMS (not just `wc -l`);
 the reconcile step cross-checks them against actual CSV line counts and Oracle.
 
-> Columns marked "verify in spike" are pinned down when the EMPLOYEES/VEHICLES DDMs
-> are inspected in the Natural CE container; update this file + the Natural programs +
-> the affected pipeline together in one commit-equivalent change.
+> Note `vehicles.csv` counts **rows in the file**, not vehicles — the reconcile step
+> derives the vehicle and plate expectations from the file itself.

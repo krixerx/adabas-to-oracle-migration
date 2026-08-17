@@ -1,0 +1,162 @@
+* EXTRFIN - extract TRAFFIC FINES (DBID 1 via UDB, file 20, DDM TRAFFINE)
+* into the contract CSVs (FLAT_FILE_CONTRACT.md):
+*   traffic_fines.csv, traffic_fine_offences.csv, traffic_fine_payments.csv
+*   + counts_fin.txt ("<file>:<count>" lines).
+* The MU (OFFENCE-CODE) and the PE (PAYMENT) become their own files, keyed by
+* parent_key = *ISN + occurrence_index - the standard flattening for any Adabas
+* repeating group (FLAT_FILE_CONTRACT.md).
+* Serialising only: the plate is written as recorded and resolving it to a
+* vehicle is Hop's job.
+* Headless run: NO terminal WRITE statements (avoids the MORE prompt).
+DEFINE DATA LOCAL
+1 V VIEW OF TRAFFINE
+  2 FINE-NO
+  2 PLATE-NO
+  2 OFFENCE-DATE
+  2 LOCATION
+  2 AMOUNT
+  2 STATUS
+  2 OFFENDER-ID
+  2 C*OFFENCE-CODE
+  2 OFFENCE-CODE (1:10)
+  2 C*PAYMENT
+  2 PAY-DATE (1:10)
+  2 PAY-AMT (1:10)
+  2 PAY-METH (1:10)
+1 #ISN (N10)
+1 #I (I4)
+1 #MAX (I4)
+1 #F (A) DYNAMIC
+1 #LINE (A) DYNAMIC
+1 #FIRST (L)
+1 #Q (I4)
+1 #C (I4)
+1 #DATE8 (A8)
+* COMPRESS on a packed field writes the digits WITHOUT the decimal point, so
+* AMOUNT 25.00 would reach the CSV as "2500" - a silent factor of 100. The
+* edit mask puts the point back; EXAMINE strips the mask's leading blanks.
+1 #AMT8 (A8)
+1 #CNT-FIN (N8)
+1 #CNT-OFF (N8)
+1 #CNT-PAY (N8)
+END-DEFINE
+*
+DEFINE WORK FILE 1 '/poc/data/traffic_fines.csv' TYPE 'ASCII'
+DEFINE WORK FILE 2 '/poc/data/traffic_fine_offences.csv' TYPE 'ASCII'
+DEFINE WORK FILE 3 '/poc/data/traffic_fine_payments.csv' TYPE 'ASCII'
+DEFINE WORK FILE 4 '/poc/data/counts_fin.txt' TYPE 'ASCII'
+*
+COMPRESS 'isn,fine_no,plate_no,offence_yyyymmdd,location,amount,'
+  'status,offender_national_id'
+  INTO #LINE LEAVING NO SPACE
+WRITE WORK FILE 1 VARIABLE #LINE
+WRITE WORK FILE 2 VARIABLE 'parent_key,occurrence_index,offence_code'
+COMPRESS 'parent_key,occurrence_index,paid_yyyymmdd,paid_amount,'
+  'payment_method'
+  INTO #LINE LEAVING NO SPACE
+WRITE WORK FILE 3 VARIABLE #LINE
+*
+READ V BY ISN
+  #ISN := *ISN
+*
+* ---- traffic_fines.csv row ---------------------------------------
+  RESET #LINE
+  #FIRST := TRUE
+  COMPRESS #ISN INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS FINE-NO INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS PLATE-NO INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  MOVE EDITED OFFENCE-DATE (EM=99999999) TO #DATE8
+  COMPRESS #DATE8 INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS LOCATION INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  MOVE EDITED AMOUNT (EM=ZZZZ9.99) TO #AMT8
+  EXAMINE #AMT8 FOR ' ' DELETE
+  COMPRESS #AMT8 INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS STATUS INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  COMPRESS OFFENDER-ID INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+  WRITE WORK FILE 1 VARIABLE #LINE
+  ADD 1 TO #CNT-FIN
+*
+* ---- traffic_fine_offences.csv (MU OFFENCE-CODE) -----------------
+  #MAX := C*OFFENCE-CODE
+  IF #MAX > 10 THEN
+    #MAX := 10
+  END-IF
+  FOR #I = 1 TO #MAX
+    RESET #LINE
+    #FIRST := TRUE
+    COMPRESS #ISN INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    COMPRESS #I INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    COMPRESS OFFENCE-CODE(#I) INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    WRITE WORK FILE 2 VARIABLE #LINE
+    ADD 1 TO #CNT-OFF
+  END-FOR
+*
+* ---- traffic_fine_payments.csv (PE PAYMENT) ----------------------
+  #MAX := C*PAYMENT
+  IF #MAX > 10 THEN
+    #MAX := 10
+  END-IF
+  FOR #I = 1 TO #MAX
+    RESET #LINE
+    #FIRST := TRUE
+    COMPRESS #ISN INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    COMPRESS #I INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    MOVE EDITED PAY-DATE(#I) (EM=99999999) TO #DATE8
+    COMPRESS #DATE8 INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    MOVE EDITED PAY-AMT(#I) (EM=ZZZZ9.99) TO #AMT8
+    EXAMINE #AMT8 FOR ' ' DELETE
+    COMPRESS #AMT8 INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    COMPRESS PAY-METH(#I) INTO #F LEAVING NO SPACE
+    PERFORM APPEND-F
+    WRITE WORK FILE 3 VARIABLE #LINE
+    ADD 1 TO #CNT-PAY
+  END-FOR
+END-READ
+*
+CLOSE WORK FILE 1
+CLOSE WORK FILE 2
+CLOSE WORK FILE 3
+*
+COMPRESS 'traffic_fines.csv:' #CNT-FIN INTO #LINE LEAVING NO SPACE
+WRITE WORK FILE 4 VARIABLE #LINE
+COMPRESS 'traffic_fine_offences.csv:' #CNT-OFF INTO #LINE LEAVING NO SPACE
+WRITE WORK FILE 4 VARIABLE #LINE
+COMPRESS 'traffic_fine_payments.csv:' #CNT-PAY INTO #LINE LEAVING NO SPACE
+WRITE WORK FILE 4 VARIABLE #LINE
+CLOSE WORK FILE 4
+*
+* ---- RFC 4180: quote #F if it contains comma or quote; append to #LINE
+DEFINE SUBROUTINE APPEND-F
+  RESET #Q #C
+  EXAMINE #F FOR '"' GIVING NUMBER #Q
+  IF #Q > 0 THEN
+    EXAMINE #F FOR '"' REPLACE WITH '""'
+  END-IF
+  EXAMINE #F FOR ',' GIVING NUMBER #C
+  IF #Q > 0 OR #C > 0 THEN
+    COMPRESS '"' #F '"' INTO #F LEAVING NO SPACE
+  END-IF
+  IF #FIRST THEN
+    #LINE := #F
+    #FIRST := FALSE
+  ELSE
+    COMPRESS #LINE ',' #F INTO #LINE LEAVING NO SPACE
+  END-IF
+END-SUBROUTINE
+*
+END

@@ -1,0 +1,634 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VEHICLES file -> POCAPP.VEHICLE : one row per PHYSICAL vehicle.
+
+  The source is one row per PLATE. A vehicle with more than one plate was
+  registered again under the same VIN with a trailing character appended, so
+  "cut the VIN to 17 and take the first row of each group" is the whole
+  de-duplication rule. Sorting on the full VIN puts the un-suffixed row first,
+  which is why plate_seq = 1 is also the row with the authoritative attributes.
+
+  WHERE THE OTHER ROWS GO: a duplicate row is not thrown away. It carries a
+  DIFFERENT PLATE for a vehicle that already exists, and 20_vehicle_plate.hpl
+  re-derives the same grouping and loads every row - so those rows become the
+  2nd and 3rd VEHICLE_PLATE entries of this same vehicle. Three Adabas rows in,
+  one VEHICLE row and three VEHICLE_PLATE rows out.
+
+  WHY TWO PIPELINES AND NOT ONE: VEHICLE.vehicle_id is an Oracle IDENTITY,
+  generated at insert. The plate rows need that key, and only the row that
+  performed the insert can know it - so the plates are loaded in a second pass
+  that looks the parent up by VIN. Re-deriving the grouping instead of passing
+  it along also means neither load depends on the other's row order.
+-->
+<pipeline>
+  <info>
+    <name>10_vehicle</name>
+    <name_sync_with_filename>Y</name_sync_with_filename>
+    <description>VEHICLES -> POCAPP.VEHICLE: de-duplicate the multi-plate rows by base VIN and resolve the standard vehicle type</description>
+    <extended_description/>
+    <pipeline_version/>
+    <pipeline_type>Normal</pipeline_type>
+    <parameters>
+    </parameters>
+    <capture_transform_performance>N</capture_transform_performance>
+    <transform_performance_capturing_delay>1000</transform_performance_capturing_delay>
+    <transform_performance_capturing_size_limit>100</transform_performance_capturing_size_limit>
+    <created_user>-</created_user>
+    <created_date>2026/08/04 18:00:00.000</created_date>
+    <modified_user>-</modified_user>
+    <modified_date>2026/08/17 12:00:00.000</modified_date>
+  </info>
+  <notepads>
+  </notepads>
+  <order>
+    <hop>
+      <from>read vehicles.csv</from>
+      <to>cut base VIN</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>cut base VIN</from>
+      <to>sort by VIN</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>sort by VIN</from>
+      <to>number the plates</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>number the plates</from>
+      <to>first row per VIN</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>first row per VIN</from>
+      <to>map vehicle type</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>first row per VIN</from>
+      <to>extra plates -> pipeline 20</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>map vehicle type</from>
+      <to>match VIN rule</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>match VIN rule</from>
+      <to>derive powertrain</to>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>derive powertrain</from>
+      <to>VEHICLE</to>
+      <enabled>Y</enabled>
+    </hop>
+  </order>
+  <transform>
+    <name>read vehicles.csv</name>
+    <type>CSVInput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <filename>${DATA_DIR}/vehicles.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
+    <enclosure>"</enclosure>
+    <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>N</newline_possible>
+    <encoding>UTF-8</encoding>
+    <schemaDefinition/>
+    <fields>
+      <field>
+        <name>isn</name>
+        <type>Integer</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>plate_no</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>personnel_id</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>make</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>model</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>color</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>year_built</name>
+        <type>Integer</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>vin</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>veh_type</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+      <field>
+        <name>fuel_desc</name>
+        <type>String</type>
+        <format/>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>112</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>cut base VIN</name>
+    <type>StringCut</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <fields>
+      <field>
+        <in_stream_name>vin</in_stream_name>
+        <out_stream_name>vin_base</out_stream_name>
+        <cut_from>0</cut_from>
+        <cut_to>17</cut_to>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>272</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>sort by VIN</name>
+    <type>SortRows</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <directory>${java.io.tmpdir}</directory>
+    <prefix>vehsort</prefix>
+    <sort_size>1000000</sort_size>
+    <free_memory/>
+    <compress>N</compress>
+    <compress_variable/>
+    <unique_rows>N</unique_rows>
+    <fields>
+      <field>
+        <name>vin_base</name>
+        <ascending>Y</ascending>
+        <case_sensitive>Y</case_sensitive>
+        <collator_enabled>N</collator_enabled>
+        <collator_strength>0</collator_strength>
+        <presorted>N</presorted>
+      </field>
+      <field>
+        <name>vin</name>
+        <ascending>Y</ascending>
+        <case_sensitive>Y</case_sensitive>
+        <collator_enabled>N</collator_enabled>
+        <collator_strength>0</collator_strength>
+        <presorted>N</presorted>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>432</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>number the plates</name>
+    <type>FieldsChangeSequence</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <fields>
+      <field>
+        <name>vin_base</name>
+      </field>
+    </fields>
+    <increment>1</increment>
+    <resultfieldName>plate_seq</resultfieldName>
+    <start>1</start>
+    <attributes/>
+    <GUI>
+      <xloc>592</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>first row per VIN</name>
+    <type>FilterRows</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <send_true_to>map vehicle type</send_true_to>
+    <send_false_to>extra plates -> pipeline 20</send_false_to>
+    <compare>
+      <condition>
+        <negated>N</negated>
+        <leftvalue>plate_seq</leftvalue>
+        <function>=</function>
+        <rightvalue/>
+        <value>
+          <name>constant</name>
+          <type>Integer</type>
+          <text>1</text>
+          <length>-1</length>
+          <precision>0</precision>
+          <isnull>N</isnull>
+          <mask>####0;-####0</mask>
+        </value>
+      </condition>
+    </compare>
+    <attributes/>
+    <GUI>
+      <xloc>752</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>extra plates -> pipeline 20</name>
+    <type>Dummy</type>
+    <description>NOT discarded. These are the 2nd and 3rd plates of a vehicle that already exists; 20_vehicle_plate.hpl re-reads the same file and loads them into VEHICLE_PLATE against this vehicle. They end here only because THIS pipeline writes one row per vehicle.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <attributes/>
+    <GUI>
+      <xloc>752</xloc>
+      <yloc>240</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>map vehicle type</name>
+    <type>DBLookup</type>
+    <description>Custom Adabas type code -> standard type. Unmapped codes fall through to 'UN'.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <cache>Y</cache>
+    <cache_load_all>Y</cache_load_all>
+    <cache_size>5000</cache_size>
+    <lookup>
+      <schema>POCAPP</schema>
+      <table>VEHICLE_TYPE_MAP</table>
+      <orderby/>
+      <fail_on_multiple>N</fail_on_multiple>
+      <eat_row_on_failure>N</eat_row_on_failure>
+      <key>
+        <name>veh_type</name>
+        <field>SOURCE_TYPE</field>
+        <condition>=</condition>
+        <name2/>
+      </key>
+      <value>
+        <name>TYPE_CODE</name>
+        <rename>vehicle_type_code</rename>
+        <default>UN</default>
+        <type>String</type>
+        <trim_type>none</trim_type>
+      </value>
+    </lookup>
+    <attributes/>
+    <GUI>
+      <xloc>1072</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>match VIN rule</name>
+    <type>DBJoin</type>
+    <description>Applies vin_powertrain_rule. Outer join: most makes have no rule and must still pass through.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <rowlimit>1</rowlimit>
+    <sql>SELECT powertrain_code AS "rule_powertrain"
+  FROM pocapp.vin_powertrain_rule
+ WHERE ? LIKE vin_pattern
+ ORDER BY priority, rule_id</sql>
+    <outer_join>Y</outer_join>
+    <replace_vars>N</replace_vars>
+    <parameter>
+      <field>
+        <name>vin_base</name>
+        <type>String</type>
+      </field>
+    </parameter>
+    <attributes/>
+    <GUI>
+      <xloc>1232</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>derive powertrain</name>
+    <type>ScriptValueMod</type>
+    <description>Normalises the free-text fuel field and runs the precedence cascade.</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <optimizationLevel>9</optimizationLevel>
+    <jsScripts>
+      <jsScript>
+        <jsScript_type>0</jsScript_type>
+        <jsScript_name>derive_powertrain</jsScript_name>
+        <jsScript_script>
+// ---------------------------------------------------------------------------
+// Derive EV / PHEV / HEV / PETROL from two partial sources, neither of which is
+// complete or clean. This is the transformation the built-in transforms cannot
+// express, which is the whole reason a script is here.
+//
+//   rule_powertrain - from the VIN, via vin_powertrain_rule (previous
+//                     transform). Null for every manufacturer with no rule,
+//                     which is most of them.
+//   fuel_desc       - thirty years of free text: 'PETROL', 'petrol', 'BENZIN',
+//                     'ELEC.', 'PLUG-IN HYBRID', 'HEV SELF CHG', 'N/A', blank.
+//
+// Precedence: the VIN beats the text, because the manufacturer stamped the VIN
+// and a clerk typed the text. Where they disagree the row still loads - it just
+// says so, via powertrain_source. Silently preferring one and discarding the
+// disagreement is how a migration loses the evidence someone will later need.
+// ---------------------------------------------------------------------------
+
+// ---- 1. normalise the free text -------------------------------------------
+var raw = (fuel_desc == null) ? "" : String(fuel_desc).toUpperCase();
+// Throw away everything that is not a letter, so 'ELEC.', 'PLUG-IN HYBRID',
+// 'N/A' and 'HEV SELF CHG' all collapse to something matchable.
+var t = raw.replace(/[^A-Z]/g, "");
+
+var descPt = null;
+
+// ORDER MATTERS, and this is the easiest mistake in the whole file:
+// 'PLUG-IN HYBRID' contains 'HYBRID'. Test plug-in FIRST or every PHEV in the
+// database silently becomes an HEV - a wrong answer that reconciles perfectly,
+// because the row counts do not change.
+if (t.search(/PLUG/) >= 0 || t.search(/PHEV/) >= 0) {
+  descPt = "PHEV";
+} else if (t.search(/HYB/) >= 0 || t.search(/HEV/) >= 0) {
+  descPt = "HEV";
+} else if (t.search(/ELEC/) >= 0 || t.search(/BATTERY/) >= 0 || t == "EV") {
+  descPt = "EV";
+} else if (t.search(/PETROL/) >= 0 || t.search(/GASOLINE/) >= 0 || t.search(/BENZIN/) >= 0) {
+  descPt = "PETROL";
+}
+// 'NA', '' and anything unrecognised stay null and fall through to UNKNOWN.
+
+// ---- 2. the cascade --------------------------------------------------------
+var rule = (rule_powertrain == null) ? "" : String(rule_powertrain);
+var powertrain_code;
+var powertrain_source;
+
+if (rule != "") {
+  powertrain_code = rule;
+  powertrain_source = (descPt != null &amp;&amp; descPt != rule) ? "VIN_RULE_CONFLICT" : "VIN_RULE";
+} else if (descPt != null) {
+  powertrain_code = descPt;
+  powertrain_source = "FUEL_DESC";
+} else {
+  powertrain_code = "UN";
+  powertrain_source = "UNKNOWN";
+}
+</jsScript_script>
+      </jsScript>
+    </jsScripts>
+    <fields>
+      <field>
+        <name>powertrain_code</name>
+        <rename>powertrain_code</rename>
+        <type>String</type>
+        <length>6</length>
+        <precision>-1</precision>
+        <replace>N</replace>
+      </field>
+      <field>
+        <name>powertrain_source</name>
+        <rename>powertrain_source</rename>
+        <type>String</type>
+        <length>20</length>
+        <precision>-1</precision>
+        <replace>N</replace>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>1392</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <transform>
+    <name>VEHICLE</name>
+    <type>TableOutput</type>
+    <description/>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning>
+      <method>none</method>
+      <schema_name/>
+    </partitioning>
+    <connection>ORACLE_POC</connection>
+    <schema>POCAPP</schema>
+    <table>VEHICLE</table>
+    <commit>1000</commit>
+    <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>Y</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields>
+      <field>
+        <column_name>SOURCE_ISN</column_name>
+        <stream_name>isn</stream_name>
+      </field>
+      <field>
+        <column_name>VIN</column_name>
+        <stream_name>vin_base</stream_name>
+      </field>
+      <field>
+        <column_name>OWNER_NATIONAL_ID</column_name>
+        <stream_name>personnel_id</stream_name>
+      </field>
+      <field>
+        <column_name>MAKE</column_name>
+        <stream_name>make</stream_name>
+      </field>
+      <field>
+        <column_name>MODEL</column_name>
+        <stream_name>model</stream_name>
+      </field>
+      <field>
+        <column_name>COLOR</column_name>
+        <stream_name>color</stream_name>
+      </field>
+      <field>
+        <column_name>YEAR_BUILT</column_name>
+        <stream_name>year_built</stream_name>
+      </field>
+      <field>
+        <column_name>SOURCE_VEHICLE_TYPE</column_name>
+        <stream_name>veh_type</stream_name>
+      </field>
+      <field>
+        <column_name>VEHICLE_TYPE_CODE</column_name>
+        <stream_name>vehicle_type_code</stream_name>
+      </field>
+      <field>
+        <column_name>SOURCE_FUEL_DESC</column_name>
+        <stream_name>fuel_desc</stream_name>
+      </field>
+      <field>
+        <column_name>POWERTRAIN_CODE</column_name>
+        <stream_name>powertrain_code</stream_name>
+      </field>
+      <field>
+        <column_name>POWERTRAIN_SOURCE</column_name>
+        <stream_name>powertrain_source</stream_name>
+      </field>
+    </fields>
+    <attributes/>
+    <GUI>
+      <xloc>1552</xloc>
+      <yloc>112</yloc>
+    </GUI>
+  </transform>
+  <attributes/>
+</pipeline>
