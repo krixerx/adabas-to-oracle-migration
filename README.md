@@ -31,16 +31,15 @@ rule.
 | **Type conversion** | Adabas numeric `YYYYMMDD` → Oracle `DATE`; packed decimal amounts → `NUMBER(9,2)` |
 | **Code resolution** | Fine status, offence and payment-method codes resolved to descriptions through a `CODE_LOOKUP` table — the classic Adabas one-file-many-code-tables pattern |
 | **Cross-file resolution** | A fine records the *plate*, so the migration resolves plate → vehicle through the plate table it just built |
-| **Derivation with provenance** | EV/PHEV/HEV/Petrol exists nowhere in the source. It is derived in **JavaScript** from two partial, disagreeing inputs — a per-manufacturer VIN rule table and thirty years of free text — and every row records *which* strategy decided it |
+| **Derivation with provenance** | A powertrain classification that exists nowhere in the source is derived in **JavaScript** from two partial, disagreeing inputs, and every row records *which* strategy decided it — see [`TESTING_GUIDE.md`](TESTING_GUIDE.md) §7.5 |
 | **Quarantine, not loss** | Rows the target model cannot hold (a fourth plate) or cannot resolve (a plate belonging to no vehicle) go to `MIGRATION_REJECT`; `loaded + rejected = rows in` is an asserted check |
 | **Reconciliation** | An independent count pass that proves the migration, rather than assuming it |
 
 Real numbers from a run: 807 vehicle rows → **773 vehicles, 797 plates** · 766 vehicle
-types replaced, 7 unmapped codes parked on `UN` · powertrain derived for all 773 — 216
-from the VIN (132 of those contradicting the fuel text), 493 from free text, 64 genuinely
-unknown · **1,136 fines** with 2,271 offence rows and 682 payment rows, 1,111 resolved to
-a vehicle · **35 rows quarantined in `MIGRATION_REJECT`** — 10 surplus plates and 25 fines
-whose plate belongs to no vehicle.
+types replaced, 7 unmapped codes parked on `UN` · a powertrain derived for all 773, 64 of
+them genuinely undecidable · **1,136 fines** with 2,271 offence rows and 682 payment
+rows, 1,111 resolved to a vehicle · **35 rows quarantined in `MIGRATION_REJECT`** — 10
+surplus plates and 25 fines whose plate belongs to no vehicle.
 
 ### The de-duplication rule
 
@@ -68,35 +67,6 @@ the extract writes the VIN exactly as stored.
 Fines then resolve against those plates, which is where the work pays off: fines written
 against `537MN75`, `90000019` and `90000020` — three unrelated-looking registrations — all
 land on the one car.
-
-### Deriving something the source does not contain
-
-The target model classifies every vehicle as **EV / PHEV / HEV / Petrol**. Nothing in
-Adabas holds that. Two partial sources have to be combined, and this is the one place a
-script is the right answer:
-
-```
-VIN  FORZE1JZW00000041          <- Ford puts the engine code at position 5
-        ^                          BMW puts it at position 8, different letters,
-                                   and most manufacturers encode nothing at all
-     └─ vin_powertrain_rule  ──▶ EV          (a TABLE, not a formula)
-
-FUEL-DESC  'HYBRID'            <- 30 years of free text: 'petrol', 'BENZIN',
-     └─ JavaScript normalise ──▶ HEV            'ELEC.', 'PLUG-IN HYBRID', 'N/A'
-
-                    they disagree ──▶ EV, powertrain_source = 'VIN_RULE_CONFLICT'
-```
-
-**There is no algorithm that decodes a VIN.** Positions 1–3 (manufacturer) and 10 (model
-year) are standardised worldwide, but 4–8 are the manufacturer's private descriptor —
-which is why NHTSA publishes the vPIC *database* rather than a formula. So the rules live
-in a table an analyst can extend, and the script does what only a script does well:
-normalise messy text, apply precedence, and record what happened.
-
-Two details carry most of the lesson. `PLUG-IN HYBRID` contains `HYBRID`, so plug-in must
-be tested **first** — get it backwards and every PHEV silently becomes an HEV while the
-row counts reconcile perfectly. And where the two sources disagree the row still loads,
-flagged rather than quietly resolved: 132 vehicles in a real run are `VIN_RULE_CONFLICT`.
 
 ## Architecture
 
@@ -141,6 +111,45 @@ needed again after every `docker compose down -v`.
 Hands-on walkthrough, including how to inspect the data at each stage:
 [`TESTING_GUIDE.md`](TESTING_GUIDE.md).
 
+## Showing that the CSVs really come out of Adabas
+
+The extract is the least self-evident stage here. Anyone looking at the lab sees CSV
+files and has no way to know whether they were produced from the database or checked in
+as fixtures — and "trust me, they're generated" is not evidence. One command settles it:
+
+```bat
+scripts\demo-extract.ps1 -Live -Pause
+```
+
+| | |
+|---|---|
+| **1** | Prints the **FDT** of the traffic-fine file — a multiple-value field and a periodic group. Neither can come out of a spreadsheet or a relational export |
+| **2** | **Adabas states its own record counts**, before any file is written |
+| **3** | **Deletes every CSV**, and aborts if `data\` is not genuinely empty |
+| **4** | Runs **only the extract**; the files reappear with the counts from step 2, reported by the Natural programs as they read |
+| **5** | `-Live`: **changes one record inside Adabas**, re-extracts, and the same CSV row comes back different — `'BLANCHE' -> 'DEMO154315'` |
+
+Step 5 is the one that matters. The first four show correlation; only changing the source
+and watching the output follow proves the CSV is a projection of Adabas rather than a file
+someone once saved. The script fails if the value does not change, so it cannot quietly
+demonstrate nothing. `-Pause` waits for a keypress between steps.
+
+**The extract is deliberately not a Hop action.** The Natural runtime lives in a different
+container and the Hop image has no Docker CLI, so a `shell` action cannot reach it without
+mounting the Docker socket into the ETL container. It is also not how production works —
+there the extract is a mainframe job under JCL, and Hop waits for the files or is started
+by the scheduler that ran it. So `migrate-all.hwf` opens with a **gate** instead:
+
+```
+Start → [Adabas extract output present?] → 10_vehicle → 20 → 30 → 40 → 50
+             │ (files missing)
+             └→ ABORT: "run scripts\extract.ps1"
+```
+
+The extract is therefore visible on the Hop canvas as where the flow begins, without
+pretending Hop performed it — and forgetting to extract now fails immediately with a
+usable message instead of as a file-not-found four transforms deep.
+
 ## Prerequisites
 
 One-time, and they need internet. After this the lab runs fully offline.
@@ -177,7 +186,7 @@ hop/pipelines/               10 vehicle (de-duplicate) · 20 vehicle_plate (+ re
 hop/workflows/               migrate-all.hwf — gates on the extract output, then runs
                              the pipelines in dependency order
 scripts/                     extract · clear-tables · reconcile · lab-up · seed-source ·
-                             make-sample-data
+                             demo-extract · make-sample-data
 data/                        extract output lands here (gitignored)
 ```
 
