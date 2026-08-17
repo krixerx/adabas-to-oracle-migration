@@ -241,6 +241,53 @@ clean-slate button — first start takes a few minutes again.
 
 ---
 
+## 6a. Demonstrating that the CSVs really come out of Adabas
+
+The extract is the least self-evident stage in the lab. An audience sees CSV files and
+has no way to know whether they came from the database or were checked in as fixtures —
+and "trust me, they're generated" is not a demo. One command answers it:
+
+```bat
+scripts\demo-extract.ps1              :: steps 1-4, read-only
+scripts\demo-extract.ps1 -Live        :: adds step 5, changes one Adabas record
+scripts\demo-extract.ps1 -Pause       :: wait for a keypress between steps
+```
+
+Five pieces of evidence, in the order an audience will accept them:
+
+1. **The structure is Adabas.** It prints the FDT of file 20 and points at the `MU`
+   option on `AH` and the `PE` group `AP`. A multiple-value field and a periodic group
+   cannot come out of a spreadsheet or a relational export — this is unmistakably the
+   real thing.
+2. **Adabas states its own record counts** — `Records loaded: 807` and `1,136` — *before
+   any file is written*. Ask the room to remember the two numbers.
+3. **Every CSV is deleted, live.** `deleting 7 files from data\ ... data\ now contains 0
+   files`. Nothing is left to fall back on, and the script aborts if the folder is not
+   actually empty.
+4. **The extract runs and the files reappear**, with the counts from step 2 — reported by
+   the Natural programs as they read, not by counting lines afterwards.
+5. **`-Live` only: a record is changed inside Adabas** (`natural\DEMOUPD.NSP` sets the
+   colour of vehicle ISN 9 to `DEMOhhmmss`), the extract is re-run, and the same CSV row
+   comes back different: `'BLANCHE' -> 'DEMO154315'`.
+
+Step 5 is the one that matters. Steps 1–4 show correlation; only changing the source and
+watching the output follow proves **causality** — that the CSV is a projection of Adabas
+and not a file someone once saved. The script fails loudly if the value does not change.
+
+If you want one more beat, stop the database and watch the extract fail:
+
+```bat
+docker compose stop adabas
+powershell -File scripts\extract.ps1     :: fails - there is nothing to read
+docker compose start adabas
+```
+
+> The `-Live` colour change is permanent until a full rebuild (`docker compose down -v`
+> then `scripts\lab-up.ps1`) — re-seeding rewrites the VIN, type and fuel text but never
+> `COLOR`. It is harmless: colour is copied straight through the migration.
+
+---
+
 ## 7. The transformations, step by step
 
 This is the part worth an hour. Nothing between the CSVs and the target model is a

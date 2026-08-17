@@ -1,0 +1,41 @@
+* DEMOUPD - change ONE vehicle inside Adabas, for demonstration purposes.
+*
+* Not part of the migration and not part of the seed. It exists so a demo can
+* prove the CSVs are a projection of Adabas rather than a fixture on disk:
+* change a record here, re-run the extract, and watch the CSV line change.
+*
+* Sets the COLOR of vehicle ISN 9 to 'DEMOhhmmss', so every run produces a
+* visibly different value. COLOR is chosen because it is easy to point at in a
+* demo - note that re-seeding does NOT put the original back (SEEDVEH rewrites
+* VIN, VEH-TYPE and FUEL-DESC, not COLOR); only a full rebuild does. Harmless,
+* since COLOR is copied through the migration untouched.
+* Headless run: NO terminal WRITE statements (avoids the MORE prompt).
+DEFINE DATA LOCAL
+1 V VIEW OF VEHICLES
+  2 REG-NUM
+  2 MAKE
+  2 COLOR
+  2 VIN
+1 #ISN (N10)
+1 #T6 (A6)
+1 #COLOR (A10)
+1 #LINE (A) DYNAMIC
+END-DEFINE
+*
+DEFINE WORK FILE 9 '/tmp/demo_update.txt' TYPE 'ASCII'
+*
+#ISN := 9
+GET V #ISN
+*
+MOVE EDITED *TIMX (EM=HHIISS) TO #T6
+COMPRESS 'DEMO' #T6 INTO #COLOR LEAVING NO SPACE
+V.COLOR := #COLOR
+UPDATE
+END TRANSACTION
+*
+COMPRESS 'isn:' #ISN 'plate:' V.REG-NUM 'make:' V.MAKE
+  'vin:' V.VIN 'new-colour:' #COLOR INTO #LINE
+WRITE WORK FILE 9 VARIABLE #LINE
+CLOSE WORK FILE 9
+*
+END

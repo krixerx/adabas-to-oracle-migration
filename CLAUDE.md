@@ -25,6 +25,7 @@ The reverse direction (Oracle → Adabas log-based sync) lives in the sibling re
 | | |
 |---|---|
 | `scripts\lab-up.ps1` | bring the lab up; clears a stale Adabas lock, then seeds the source data — prefer this over bare `docker compose up` |
+| `scripts\demo-extract.ps1 [-Live]` | proves the CSVs come out of Adabas: FDT with MU/PE, Adabas's own counts, delete the CSVs, re-extract, and (`-Live`) change a record and watch the CSV follow |
 | `scripts\seed-source.ps1` | lab data preparation only (ADADBM field add, ADAFDU file create, Natural SEEDVEH + SEEDFIN); idempotent |
 | `migrate.cmd` | full run: extract → clear → transform+load → reconcile |
 | `migrate.cmd --skip-extract` | inner loop while editing mappings; reuses the CSVs in `data\` (<1 min) |
