@@ -219,6 +219,17 @@
         <precision>-1</precision>
         <trim_type>both</trim_type>
       </field>
+      <field>
+        <name>plate_expiry</name>
+        <type>Date</type>
+        <format>yyyyMMdd</format>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
     </fields>
     <attributes/>
     <GUI>
@@ -482,6 +493,10 @@
       <field>
         <column_name>SOURCE_ISN</column_name>
         <stream_name>isn</stream_name>
+      </field>
+      <field>
+        <column_name>EXPIRY_DATE</column_name>
+        <stream_name>plate_expiry</stream_name>
       </field>
     </fields>
     <attributes/>

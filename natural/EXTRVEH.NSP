@@ -12,6 +12,7 @@ DEFINE DATA LOCAL
   2 VIN
   2 VEH-TYPE
   2 FUEL-DESC
+  2 PLATE-EXPIRY
 1 #ISN (N10)
 1 #F (A) DYNAMIC
 1 #LINE (A) DYNAMIC
@@ -27,7 +28,7 @@ DEFINE WORK FILE 7 '/poc/data/counts_veh.txt' TYPE 'ASCII'
 * VIN is written EXACTLY as stored - suffix and all. Splitting it into base VIN
 * and suffix is a mapping decision, so it belongs in Hop, not here.
 COMPRESS 'isn,plate_no,personnel_id,make,model,color,year_built,vin,'
-  'veh_type,fuel_desc'
+  'veh_type,fuel_desc,plate_expiry'
   INTO #LINE LEAVING NO SPACE
 WRITE WORK FILE 6 VARIABLE #LINE
 *
@@ -56,6 +57,16 @@ READ V BY ISN
 * written verbatim, mixed case and punctuation intact - normalising it is a
 * mapping decision and happens in JavaScript, not here
   COMPRESS FUEL-DESC INTO #F LEAVING NO SPACE
+  PERFORM APPEND-F
+* An unset expiry means the plate is still current. It is written as an EMPTY
+* field, not as 0: the contract says empty = NULL, and a literal 0 would have
+* to be special-cased downstream into a date that does not exist. The test
+* belongs here, where "no expiry" is obvious, not in a mapping rule.
+  IF PLATE-EXPIRY = 0
+    RESET #F
+  ELSE
+    COMPRESS PLATE-EXPIRY INTO #F LEAVING NO SPACE
+  END-IF
   PERFORM APPEND-F
   WRITE WORK FILE 6 VARIABLE #LINE
   ADD 1 TO #CNT-VEH
