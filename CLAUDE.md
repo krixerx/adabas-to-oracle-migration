@@ -160,7 +160,8 @@ Most breakage here is a half-applied change across files that share one fact.
   Never compute them a second way: a second implementation of the rule would agree with
   a bug in the first.
 - **A target table or column** → `oracle-init/01_schema.sql` + the pipeline + (if it is a
-  new table) `scripts/reconcile.ps1` and the DELETE order in `scripts/clear-tables.ps1`.
+  new table) `scripts/reconcile.ps1` and the DELETE order in `hop/sql/00_clear_targets.sql`, which is shared by
+  `clear-tables.ps1` and by the opening action of BOTH workflows.
 - **Lookup seed rows** → `oracle-init/02_lookups.sql` + the `$seedRules` counts in
   `scripts/reconcile.ps1` (`CODE_LOOKUP` 13, `VEHICLE_TYPE` 6, `VEHICLE_TYPE_MAP` 9,
   `POWERTRAIN_TYPE` 5, `VIN_POWERTRAIN_RULE` 8). The
@@ -268,6 +269,17 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
 - **Piping a here-string into `sqlplus` sends a UTF-8 BOM**, which sqlplus reports as
   SP2-0734 against whatever is on line 1. Set `$OutputEncoding` and start the script with
   a blank line so the BOM lands somewhere harmless.
+- **A workflow run from the Hop GUI does not get `migrate.cmd`'s other steps.** That is
+  obvious in hindsight and cost a confusing failure: with the target tables still holding
+  the previous run, the first insert dies with `ORA-00001: unique constraint
+  (POCAPP.UQ_VEHICLE_ISN) violated`, which reads like a data problem and is not one. Both
+  workflows therefore open with a `00 clear targets` SQL action running
+  `hop/sql/00_clear_targets.sql`, so each one is a complete, re-runnable unit;
+  `migrate.cmd` still calls `clear-tables.ps1` first, which is then a no-op. If you add a
+  step that a workflow depends on, put it IN the workflow, not only in the wrapper.
+- **`Sort-Object <key>` does not work on a hashtable, and PowerShell's sort is not
+  stable.** `benchmark.ps1` used it to pick the faster arm and named the SLOWER one when
+  the two were close (49.8 s vs 51.0 s). Compare explicitly, or use `PSCustomObject`.
 - **Ports 60001, 8190, 2700, 1521** collide with the sibling `oracle-to-adabas-sync` lab.
   One at a time.
 

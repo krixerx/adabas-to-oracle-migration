@@ -176,8 +176,17 @@ foreach ($r in $results) {
 Write-Host "----------------------------------------------------------------------------"
 
 if ($results.Count -eq 2) {
-    $fast = ($results | Sort-Object seconds)[0]
-    $slow = ($results | Sort-Object seconds)[-1]
+    # Picked by comparison, not by Sort-Object: these are hashtables, Sort-Object
+    # does not resolve a bare key name on one, and PowerShell's sort is not
+    # stable - so when the two arms came out 49.8s and 51.0s it reported the
+    # SLOWER one as faster. A benchmark that can name the wrong winner is worse
+    # than no benchmark.
+    $fast = $results[0]
+    $slow = $results[0]
+    foreach ($r in $results) {
+        if ($r.seconds -lt $fast.seconds) { $fast = $r }
+        if ($r.seconds -gt $slow.seconds) { $slow = $r }
+    }
     Write-Host ("  {0} is {1:N1}x faster" -f $fast.name, ($slow.seconds / $fast.seconds))
     if ($identical) {
         Write-Host "  fingerprints MATCH - both techniques produced identical data" -ForegroundColor Green

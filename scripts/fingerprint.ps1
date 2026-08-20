@@ -83,5 +83,17 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "fingerprint failed (sqlplus exit $LASTEXITCODE)"
     exit 1
 }
-$out | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+# Keep only lines that ARE a fingerprint: NAME, count, hash. sqlplus prepends
+# whatever it did not understand - notably the UTF-8 BOM PowerShell puts on the
+# pipe, which arrives as SP2-0042 - and benchmark.ps1 compares these lines
+# verbatim, so preamble noise would end up inside the comparison.
+$rows = $out | ForEach-Object { $_.Trim() -replace '\s+', ' ' } |
+        Where-Object { $_ -match '^[A-Z_]+ \d+ \d+$' }
+
+if ($rows.Count -ne 6) {
+    Write-Host $out
+    Write-Error "expected 6 fingerprint rows, got $($rows.Count) - see the sqlplus output above"
+    exit 1
+}
+$rows
 exit 0
