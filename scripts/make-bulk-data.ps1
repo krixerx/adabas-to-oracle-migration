@@ -193,7 +193,7 @@ $swf = [Diagnostics.Stopwatch]::StartNew()
 $statuses = @('I','P','C','A')
 $offCodes = @('SPD1','SPD2','RLGT','SBLT','MOBP','PARK')
 $methods  = @('CA','CC','BT')
-$places   = @('SULTAN QABOOS ST','AL KHUWAIR','RUWI HIGH ST','SEEB ROAD','MUTRAH CORNICHE')
+$places   = @('NORTH RING ROAD','HARBOUR ROUNDABOUT','MARKET HIGH ST','AIRPORT ROAD','QUAYSIDE PROMENADE')
 
 $fineRows = 0; $finesResolved = 0; $offRows = 0; $payRows = 0
 

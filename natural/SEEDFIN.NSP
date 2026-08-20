@@ -84,12 +84,12 @@ DEFINE WORK FILE 8 '/tmp/seed_fine_counts.txt' TYPE 'ASCII'
 #FINES(4) := 3
 #FINES(5) := 0
 *
-#LOCS(1) := 'SULTAN QABOOS ST'
-#LOCS(2) := 'AL KHUWAIR R/A'
-#LOCS(3) := 'MUSCAT EXPRESSWAY'
-#LOCS(4) := 'NIZWA HIGHWAY'
-#LOCS(5) := 'SOHAR PORT RD'
-#LOCS(6) := 'SALALAH CORNICHE'
+#LOCS(1) := 'NORTH RING ROAD'
+#LOCS(2) := 'HARBOUR ROUNDABOUT'
+#LOCS(3) := 'CENTRAL EXPRESSWAY'
+#LOCS(4) := 'RIVERSIDE HIGHWAY'
+#LOCS(5) := 'DOCKLANDS PORT RD'
+#LOCS(6) := 'OLD TOWN PROMENADE'
 *
 * offence codes as the legacy system wrote them - resolved via CODE_LOOKUP
 #OFFCD(1) := 'SPD1'
