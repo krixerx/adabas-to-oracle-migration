@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workflow>
+  <name>migrate-staging</name>
+  <name_sync_with_filename>Y</name_sync_with_filename>
+  <description>The staging path: land the flat files in Oracle unchanged, then do the whole structural redesign in set-based SQL. Same source files and same target tables as migrate-all.hwf, and the same reconciliation has to pass - only the technique differs.</description>
+  <extended_description>Hop orchestrates here and does not transform. Every box is one SQL statement set in hop/sql/, run in dependency order against ORACLE_POC, with the file gate and the abort path unchanged from migrate-all.hwf. The point of keeping both workflows is that they are directly comparable: scripts\benchmark.ps1 runs each and checks that they produce identical tables.</extended_description>
+  <created_user>-</created_user>
+  <modified_user>-</modified_user>
+  <created_date>2026/08/20 12:00:00.000</created_date>
+  <modified_date>2026/08/20 12:00:00.000</modified_date>
+  <workflow_version/>
+  <parameters/>
+  <actions>
+    <action>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <intervalSeconds>0</intervalSeconds>
+      <intervalMinutes>60</intervalMinutes>
+      <DayOfMonth>1</DayOfMonth>
+      <weekDay>1</weekDay>
+      <minutes>0</minutes>
+      <hour>12</hour>
+      <doNotWaitOnFirstExecution>N</doNotWaitOnFirstExecution>
+      <name>Start</name>
+      <description></description>
+      <type>SPECIAL</type>
+      <attributes/>
+      <xloc>32</xloc>
+      <yloc>80</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <fields>
+        <field>
+          <name>${DATA_DIR}/vehicles.csv</name>
+        </field>
+        <field>
+          <name>${DATA_DIR}/traffic_fines.csv</name>
+        </field>
+        <field>
+          <name>${DATA_DIR}/traffic_fine_offences.csv</name>
+        </field>
+        <field>
+          <name>${DATA_DIR}/traffic_fine_payments.csv</name>
+        </field>
+      </fields>
+      <name>Adabas extract output present?</name>
+      <description>Oracle reads these files itself, as external tables. The gate is here anyway: a missing file would otherwise surface as an ORA-29913 four steps later.</description>
+      <type>FILES_EXIST</type>
+      <attributes/>
+      <xloc>176</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <message>The contract CSVs are not in data\. The Adabas extract has not been run, or the lab source was never seeded. Run: scripts\extract.ps1  (or scripts\lab-up.ps1 then migrate.cmd)</message>
+      <always_log_rows>N</always_log_rows>
+      <name>no extract - run scripts\extract.ps1</name>
+      <description>Reached only when the contract files are missing.</description>
+      <type>ABORT</type>
+      <attributes/>
+      <xloc>176</xloc>
+      <yloc>240</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/10_load_staging.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>10 load staging</name>
+      <description>Truncate staging and land all four contract files with direct-path inserts from the external tables. No transformation - this step only gets the bytes across the boundary.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>368</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/20_vehicle.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>20 vehicle</name>
+      <description>One row per plate becomes one row per vehicle: ROW_NUMBER over the base VIN, plus the powertrain cascade. The de-duplication, as one set operation.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>544</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/30_vehicle_plate.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>30 vehicle plate</name>
+      <description>Every registration becomes a plate row, with the surrogate key resolved by joining back to VEHICLE on the base VIN.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>720</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/40_reject_plates.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>40 reject plates</name>
+      <description>The fourth plate on a VIN has nowhere to go in the target model, so it is quarantined instead of dropped.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>896</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/50_traffic_fine.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>50 traffic fine</name>
+      <description>Fines, with the plate resolved to a vehicle through VEHICLE_PLATE. An unmatched plate is normal and loads with vehicle_id NULL.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>1072</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/60_reject_fines.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>60 reject fines</name>
+      <description>Record the fines whose plate resolved to nothing, so they are visible rather than merely absent.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>1248</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+    <action>
+      <sql/>
+      <connection>ORACLE_POC</connection>
+      <useVariableSubstitution>N</useVariableSubstitution>
+      <sqlFromFile>Y</sqlFromFile>
+      <sqlFilename>${PROJECT_HOME}/sql/70_fine_children.sql</sqlFilename>
+      <sqlFilenameEncoding>UTF-8</sqlFilenameEncoding>
+      <sendOneStatement>N</sendOneStatement>
+      <name>70 fine children</name>
+      <description>The MU offences and PE payments, already flattened by the extract, joined to their fine on the source ISN.</description>
+      <type>SQL</type>
+      <attributes/>
+      <xloc>1424</xloc>
+      <yloc>112</yloc>
+      <parallel>N</parallel>
+      <attributes_hac/>
+    </action>
+  </actions>
+  <hops>
+    <hop>
+      <from>Start</from>
+      <to>Adabas extract output present?</to>
+      <evaluation>Y</evaluation>
+      <unconditional>Y</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>Adabas extract output present?</from>
+      <to>10 load staging</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>Adabas extract output present?</from>
+      <to>no extract - run scripts\extract.ps1</to>
+      <evaluation>N</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>10 load staging</from>
+      <to>20 vehicle</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>20 vehicle</from>
+      <to>30 vehicle plate</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>30 vehicle plate</from>
+      <to>40 reject plates</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>40 reject plates</from>
+      <to>50 traffic fine</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>50 traffic fine</from>
+      <to>60 reject fines</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+    <hop>
+      <from>60 reject fines</from>
+      <to>70 fine children</to>
+      <evaluation>Y</evaluation>
+      <unconditional>N</unconditional>
+      <enabled>Y</enabled>
+    </hop>
+  </hops>
+  <notepads/>
+  <attributes/>
+</workflow>

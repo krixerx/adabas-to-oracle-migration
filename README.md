@@ -98,6 +98,7 @@ contract in [`FLAT_FILE_CONTRACT.md`](FLAT_FILE_CONTRACT.md).
 scripts\lab-up.ps1              :: bring the lab up + prepare the source data
 migrate.cmd                     :: full run, ends "VERIFIED: 11/11"
 migrate.cmd --skip-extract      :: inner mapping loop, reuses existing CSVs (<1 min)
+migrate.cmd --staging           :: same migration, reshaped in set-based SQL
 ```
 
 **Start with `lab-up.ps1`, not with `docker compose up`.** Besides clearing a stale
@@ -150,6 +151,70 @@ The extract is therefore visible on the Hop canvas as where the flow begins, wit
 pretending Hop performed it — and forgetting to extract now fails immediately with a
 usable message instead of as a file-not-found four transforms deep.
 
+## Two ways to do the same migration
+
+The pipelines reshape **row by row**: every record is read, sorted, looked up and
+written by a JVM, one at a time. That is readable and debuggable and exactly right for
+a lab — and it is the wrong engine at real volume, because every move the
+redesign actually makes is a *set* operation:
+
+| the move | what it really is |
+|---|---|
+| one row per plate → one vehicle | `ROW_NUMBER() OVER (PARTITION BY base VIN ORDER BY full VIN)` |
+| fine names a plate → find the car | a join |
+| house codes → standard codes | a join |
+| one file → six tables | six `INSERT … SELECT` |
+
+So there is a second path that does the identical migration a different way:
+
+```
+                                  ┌─ hop/workflows/migrate-all.hwf      row by row
+contract CSVs in data/  ──────────┤   pipelines 10..50
+                                  └─ hop/workflows/migrate-staging.hwf  staging + SQL
+                                      ext_* external tables → stg_* → hop/sql/*.sql
+```
+
+**Staging mirrors the file, not the target** (`oracle-init/03_staging.sql`): same columns,
+same names, dates and amounts still text. Oracle reads the CSVs in place as **external
+tables** — `./data` is bind-mounted into the container — and a direct-path insert lands
+them. Everything that makes the target model different from the source then happens in
+`hop/sql/`, seven statements, next to the data. **Hop still orchestrates and still
+referees; it just stops being the transformation engine.**
+
+Both paths are held to the same standard: the same `reconcile.ps1`, the same
+**`VERIFIED: 11/11`**.
+
+### Measuring the difference
+
+```bat
+scripts@make-bulk-data.ps1 -Vehicles 1000000 -Fines 200000   :: contract CSVs at any scale
+scripts@benchmark.ps1                                        :: run both arms, compare
+scripts@fingerprint.ps1                                      :: content hash per table
+```
+
+`benchmark.ps1` runs each workflow, reconciles it, and then requires the two to produce
+**byte-identical data** — a content fingerprint per table, hashed on business keys rather
+than on the IDENTITY surrogates, which differ by insert order and prove nothing. Counts
+alone would not be enough: two techniques can agree on how many rows they produced and
+disagree about what is in them.
+
+Measured so far, on this laptop:
+
+| source rows | row by row | staging + SQL | |
+|---:|---:|---:|---|
+| 19,222 | 45.0 s | 37.2 s | start-up dominated — **not a throughput measurement** |
+| 384,400 | 121.3 s | 46.0 s | **2.6×**, and the gap was still widening |
+
+Both arms verified 11/11 and produced identical fingerprints at both sizes. Below about
+a million rows the wall clock is mostly Docker starting a container and a JVM loading
+Hop's plugin registry — the same toll in both arms — so `benchmark.ps1` refuses to print
+a rows/s extrapolation there rather than offer a confident-looking number that is really
+a measurement of Docker. **The 10 M-row run has not been done yet**; the harness is built
+for it and the generator is the only slow part (~22,000 rows/s).
+
+What the numbers do *not* cover: the extract itself (a mainframe question), index and
+constraint maintenance at real volume, and Oracle Free's 2 CPU threads and 2 GB SGA.
+
 ## Prerequisites
 
 One-time, and they need internet. After this the lab runs fully offline.
@@ -177,16 +242,19 @@ the other** — they are designed to run one at a time.
 migrate.cmd                  the one command
 docker-compose.yml           adabas, natural, oracle, hop-run
 FLAT_FILE_CONTRACT.md        the extract → transform interface
-oracle-init/                 target DDL + lookup/mapping seeds (auto-applied on first start)
+oracle-init/                 target DDL + lookup/mapping seeds + the staging layer
+                             (auto-applied on first container start)
 natural/                     extract programs (EXTRVEH, EXTRFIN), the lab data seeders
                              (SEEDVEH, SEEDFIN), the DDMs and the traffic-fine FDT
 hop/pipelines/               10 vehicle (de-duplicate) · 20 vehicle_plate (+ rejects) ·
                              30 traffic_fine (plate → vehicle) · 40 offences (MU) ·
                              50 payments (PE)
+hop/sql/                     the staging path's seven transformation statements
 hop/workflows/               migrate-all.hwf — gates on the extract output, then runs
                              the pipelines in dependency order
 scripts/                     extract · clear-tables · reconcile · lab-up · seed-source ·
-                             demo-extract · make-sample-data
+                             demo-extract · make-sample-data · setup-staging ·
+                             make-bulk-data · reconcile-bulk · fingerprint · benchmark
 data/                        extract output lands here (gitignored)
 ```
 

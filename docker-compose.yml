@@ -54,6 +54,12 @@ services:
     volumes:
       - oracle-data:/opt/oracle/oradata
       - ./oracle-init:/container-entrypoint-initdb.d:ro
+      # The contract CSVs, readable by the database itself. This is what lets the
+      # staging path read them as EXTERNAL TABLES - Oracle parses the file in
+      # place, with no client in the middle and no second copy on disk. Read-only
+      # on purpose: the database consumes the extract, it never writes to it,
+      # which is also why the external tables declare NOLOGFILE/NOBADFILE.
+      - ./data:/opt/oracle/a2o-data:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 15s
