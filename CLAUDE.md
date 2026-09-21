@@ -30,6 +30,8 @@ The reverse direction (Oracle → Adabas log-based sync) lives in the sibling re
 | `migrate.cmd` | full run: extract → clear → transform+load → reconcile |
 | `migrate.cmd --skip-extract` | inner loop while editing mappings; reuses the CSVs in `data\` (<1 min) |
 | `migrate.cmd --staging` | same migration, reshaped in **set-based SQL** instead of row by row. Same reconciliation, same `VERIFIED: 11/11` |
+| `scriptsesize-redo.ps1` | replace the image's 2 x 10 MB redo logs with 3 x 512 MB. Run once before any volume run - undersized logs stall the load AND skew the benchmark, since the two arms generate very different amounts of redo. Idempotent; lost on `down -v` |
+| `scriptseset-oracle.ps1` | drop and rebuild the POCAPP schema from `oracle-init\*.sql` in seconds, Adabas untouched. For a known state before a demo, or after an aborted run left a constraint disabled - not for speed, since `TRUNCATE` is already O(1) |
 | `scripts\setup-staging.ps1` | apply `oracle-init/03_staging.sql` to an existing lab (and recreate the oracle container if `./data` is not mounted yet). Idempotent |
 | `scripts\make-bulk-data.ps1 -Vehicles N -Fines M` | contract CSVs at any scale, plus `data\bulk-expectations.json`. **Overwrites the real extract** |
 | `scripts\benchmark.ps1` | run both techniques, reconcile each, and require identical fingerprints |
@@ -160,8 +162,9 @@ Most breakage here is a half-applied change across files that share one fact.
   Never compute them a second way: a second implementation of the rule would agree with
   a bug in the first.
 - **A target table or column** → `oracle-init/01_schema.sql` + the pipeline + (if it is a
-  new table) `scripts/reconcile.ps1` and the DELETE order in `hop/sql/00_clear_targets.sql`, which is shared by
-  `clear-tables.ps1` and by the opening action of BOTH workflows.
+  new table) `scripts/reconcile.ps1` and `hop/sql/00_clear_targets.sql` — where a new
+  table needs BOTH a `TRUNCATE` and, if an enabled FK points at it, a DISABLE/ENABLE pair.
+  That file is shared by `clear-tables.ps1` and by the opening action of BOTH workflows.
 - **Lookup seed rows** → `oracle-init/02_lookups.sql` + the `$seedRules` counts in
   `scripts/reconcile.ps1` (`CODE_LOOKUP` 13, `VEHICLE_TYPE` 6, `VEHICLE_TYPE_MAP` 9,
   `POWERTRAIN_TYPE` 5, `VIN_POWERTRAIN_RULE` 8). The
@@ -218,8 +221,15 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
   mainframe job. `migrate-all.hwf` instead opens with a `FILES_EXIST` gate that aborts
   with a usable message when the contract files are missing; do not "fix" this by adding
   a shell action.
-- **Clear with `DELETE`, child-first — never `TRUNCATE`** (ORA-02266 against enabled FKs,
-  even with empty children).
+- **Clear with `TRUNCATE`, with the four inbound FKs disabled around it** — `TRUNCATE`
+  alone raises ORA-02266 against an enabled FK even when the child is empty, which is why
+  the file used child-first `DELETE` until 2026-09-21. At 100,000 vehicles that `DELETE`
+  took **twenty minutes**: `traffic_fine.vehicle_id` had no index, so Oracle full-scanned
+  `TRAFFIC_FINE` once per deleted parent row (320 M block reads) — and scanned *empty*
+  blocks, because `DELETE` leaves the high-water mark where the last load put it.
+  `ix_traffic_fine_vehicle` now exists and the clear truncates. An unindexed foreign key
+  is invisible at lab scale and brutal at volume; check for one whenever a parent delete
+  gets slow.
 - **`ADADBM ADD_FIELDS` takes its field definitions as parameter lines** ending in
   `end_of_fields` — the `field=` keyword it also accepts answers `FDUSYN` whatever you
   give it. And **piping those parameters into `docker exec -i` from PowerShell makes
@@ -277,6 +287,12 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
   `hop/sql/00_clear_targets.sql`, so each one is a complete, re-runnable unit;
   `migrate.cmd` still calls `clear-tables.ps1` first, which is then a no-op. If you add a
   step that a workflow depends on, put it IN the workflow, not only in the wrapper.
+- **A PowerShell function returning a one-element array hands back a bare string.**
+  `(Invoke-Sql ...)[0]` then indexes into the *string* and returns its first
+  CHARACTER, which parses as a number and looks entirely plausible - `resize-redo.ps1`
+  read "group 0, directory nothing" and the first thing that noticed was Oracle
+  refusing to add a logfile group 1 that already existed. Wrap the call site in `@(...)`,
+  not just the return.
 - **`Sort-Object <key>` does not work on a hashtable, and PowerShell's sort is not
   stable.** `benchmark.ps1` used it to pick the faster arm and named the SLOWER one when
   the two were close (49.8 s vs 51.0 s). Compare explicitly, or use `PSCustomObject`.

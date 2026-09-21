@@ -165,6 +165,16 @@ CREATE TABLE pocapp.traffic_fine (
     REFERENCES pocapp.vehicle (vehicle_id)
 );
 
+-- An index on the FK column, and it is not about joins. Without one, deleting a
+-- VEHICLE row makes Oracle prove no fine references it by FULL-SCANNING this
+-- table - once per deleted row. Measured 2026-09-21 on a 100,000-vehicle reload:
+-- 320 million block reads and twenty minutes to clear, scanning a table that was
+-- already EMPTY, because DELETE leaves the high-water mark where the previous
+-- load put it. The clear now truncates (hop/sql/00_clear_targets.sql), which
+-- avoids that particular run-in, but an unindexed foreign key is a trap on any
+-- parent delete and this is where the real migration would meet it.
+CREATE INDEX pocapp.ix_traffic_fine_vehicle ON pocapp.traffic_fine (vehicle_id);
+
 -- MU OFFENCE-CODE -> one row per offence.
 CREATE TABLE pocapp.traffic_fine_offence (
   fine_id       NUMBER       NOT NULL,
