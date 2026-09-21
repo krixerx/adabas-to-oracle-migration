@@ -268,7 +268,11 @@
     </partitioning>
     <directory>${java.io.tmpdir}</directory>
     <prefix>vehsort</prefix>
-    <sort_size>1000000</sort_size>
+    <!-- Rows held in memory before spilling to ${java.io.tmpdir}. Deliberately far
+         below the input size: at 1.12 M plate rows the old 1000000 meant "never
+         spill", which is a promise a 2 GB heap cannot keep. Spilling is slower and
+         it finishes. -->
+    <sort_size>100000</sort_size>
     <free_memory/>
     <compress>N</compress>
     <compress_variable/>

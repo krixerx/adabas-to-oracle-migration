@@ -30,6 +30,7 @@ The reverse direction (Oracle → Adabas log-based sync) lives in the sibling re
 | `migrate.cmd` | full run: extract → clear → transform+load → reconcile |
 | `migrate.cmd --skip-extract` | inner loop while editing mappings; reuses the CSVs in `data\` (<1 min) |
 | `migrate.cmd --staging` | same migration, reshaped in **set-based SQL** instead of row by row. Same reconciliation, same `VERIFIED: 11/11` |
+| `scripts\watch-progress.ps1` | progress bars for a running migration, from a second window: target and staging row counts against `dataulk-expectations.json`, with a rate and an ETA. Read-only |
 | `scriptsesize-redo.ps1` | replace the image's 2 x 10 MB redo logs with 3 x 512 MB. Run once before any volume run - undersized logs stall the load AND skew the benchmark, since the two arms generate very different amounts of redo. Idempotent; lost on `down -v` |
 | `scriptseset-oracle.ps1` | drop and rebuild the POCAPP schema from `oracle-init\*.sql` in seconds, Adabas untouched. For a known state before a demo, or after an aborted run left a constraint disabled - not for speed, since `TRUNCATE` is already O(1) |
 | `scripts\setup-staging.ps1` | apply `oracle-init/03_staging.sql` to an existing lab (and recreate the oracle container if `./data` is not mounted yet). Idempotent |
@@ -287,6 +288,15 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
   `hop/sql/00_clear_targets.sql`, so each one is a complete, re-runnable unit;
   `migrate.cmd` still calls `clear-tables.ps1` first, which is then a no-op. If you add a
   step that a workflow depends on, put it IN the workflow, not only in the wrapper.
+- **A `DBLookup` with "load all data from table" preloads the WHOLE table into the JVM.**
+  Right for `CODE_LOOKUP` (13 rows), fatal for a migrated table: at 2.5 M fines
+  `resolve fine_id` died in `DatabaseLookup.loadAllTableDataIntoTheCache` with
+  `OutOfMemoryError`, because it clones the row metadata per cached row — and
+  `hop-run.sh` hardcodes `-Xmx2048m` whatever the host has. The four lookups that read
+  a migrated table now do indexed per-row lookups with a bounded cache; the four that
+  read a lookup table still preload. If you add a lookup, decide which kind it is.
+- **`sort_size` is rows held in RAM before spilling**, not a buffer hint. 1,000,000 was
+  "never spill" at lab scale and a promise the heap could not keep at 1.12 M rows.
 - **A PowerShell function returning a one-element array hands back a bare string.**
   `(Invoke-Sql ...)[0]` then indexes into the *string* and returns its first
   CHARACTER, which parses as a number and looks entirely plausible - `resize-redo.ps1`
