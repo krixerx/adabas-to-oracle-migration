@@ -10,7 +10,7 @@ rem a project variable outranks an environment variable and would win on both si
 rem breaking either the GUI (ORA-17868) or the container runs (ORA-12541).
 rem The set below is a harmless belt-and-braces; on its own it does nothing, because
 rem Hop does not adopt OS environment variables as Hop variables here.
-if "%HOP_HOME%"=="" set HOP_HOME=C:\hop
+if "%HOP_HOME%"=="" set HOP_HOME=C:\apache-hop-client-2.19.0\hop
 set ORACLE_HOST=localhost
 cd /d "%HOP_HOME%"
-start "Apache Hop GUI" hop-gui.bat
+start "Apache Hop GUI" "%HOP_HOME%\hop-gui.bat"
