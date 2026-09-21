@@ -219,6 +219,17 @@
         <precision>-1</precision>
         <trim_type>both</trim_type>
       </field>
+      <field>
+        <name>plate_expiry</name>
+        <type>Date</type>
+        <format>yyyyMMdd</format>
+        <currency/>
+        <decimal/>
+        <group/>
+        <length>-1</length>
+        <precision>-1</precision>
+        <trim_type>both</trim_type>
+      </field>
     </fields>
     <attributes/>
     <GUI>
@@ -264,7 +275,11 @@
     </partitioning>
     <directory>${java.io.tmpdir}</directory>
     <prefix>platesort</prefix>
-    <sort_size>1000000</sort_size>
+    <!-- Rows held in memory before spilling to ${java.io.tmpdir}. Deliberately far
+         below the input size: at 1.12 M plate rows the old 1000000 meant "never
+         spill", which is a promise a 2 GB heap cannot keep. Spilling is slower and
+         it finishes. -->
+    <sort_size>100000</sort_size>
     <free_memory/>
     <compress>N</compress>
     <compress_variable/>
@@ -367,7 +382,12 @@
     </partitioning>
     <connection>ORACLE_POC</connection>
     <cache>Y</cache>
-    <cache_load_all>Y</cache_load_all>
+      <!-- NOT load-all: this reads a MIGRATED table, not a lookup table. 'Load all data from
+           table' preloads every row into a JVM HashMap, cloning the row metadata per
+           row - at 2.5 M fines that is an OutOfMemoryError in DatabaseLookup.loadAllTableDataIntoTheCache (2026-09-21), and the Hop image hardcodes
+           -Xmx2048m. The key column is indexed on every one of these (uq_vehicle_vin), so a
+           per-row lookup is an index hit, and cache_size bounds what is kept. -->
+    <cache_load_all>N</cache_load_all>
     <cache_size>5000</cache_size>
     <lookup>
       <schema>POCAPP</schema>
@@ -482,6 +502,10 @@
       <field>
         <column_name>SOURCE_ISN</column_name>
         <stream_name>isn</stream_name>
+      </field>
+      <field>
+        <column_name>EXPIRY_DATE</column_name>
+        <stream_name>plate_expiry</stream_name>
       </field>
     </fields>
     <attributes/>

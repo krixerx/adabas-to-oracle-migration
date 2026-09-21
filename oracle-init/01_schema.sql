@@ -120,6 +120,11 @@ CREATE TABLE pocapp.vehicle_plate (
                                                  -- vehicle with no registration number
                                                  -- (found 2026-08-05, ISN 158)
   source_isn  NUMBER      NOT NULL,              -- the duplicate row this plate came from
+  -- A registration is never deleted, it EXPIRES: NULL means still current.
+  -- From Adabas BD PLATE-EXPIRY (numeric YYYYMMDD), which the lab added to
+  -- file 12 - the legacy file had no such field, and AJ DATE-ACQ is a
+  -- different fact that must not be repurposed.
+  expiry_date DATE,
   CONSTRAINT pk_vehicle_plate      PRIMARY KEY (vehicle_id, plate_seq),
   CONSTRAINT ck_vehicle_plate_seq  CHECK (plate_seq BETWEEN 1 AND 3),
   CONSTRAINT uq_vehicle_plate_isn  UNIQUE (source_isn),
@@ -159,6 +164,16 @@ CREATE TABLE pocapp.traffic_fine (
   CONSTRAINT fk_traffic_fine_veh FOREIGN KEY (vehicle_id)
     REFERENCES pocapp.vehicle (vehicle_id)
 );
+
+-- An index on the FK column, and it is not about joins. Without one, deleting a
+-- VEHICLE row makes Oracle prove no fine references it by FULL-SCANNING this
+-- table - once per deleted row. Measured 2026-09-21 on a 100,000-vehicle reload:
+-- 320 million block reads and twenty minutes to clear, scanning a table that was
+-- already EMPTY, because DELETE leaves the high-water mark where the previous
+-- load put it. The clear now truncates (hop/sql/00_clear_targets.sql), which
+-- avoids that particular run-in, but an unindexed foreign key is a trap on any
+-- parent delete and this is where the real migration would meet it.
+CREATE INDEX pocapp.ix_traffic_fine_vehicle ON pocapp.traffic_fine (vehicle_id);
 
 -- MU OFFENCE-CODE -> one row per offence.
 CREATE TABLE pocapp.traffic_fine_offence (

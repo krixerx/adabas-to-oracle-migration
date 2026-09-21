@@ -36,6 +36,14 @@ quoting, NULL convention) after EBCDIC→UTF-8 conversion.
 | vin | VIN (BA) | **as stored, suffix and all** — see below |
 | veh_type | VEH-TYPE (BB) | the legacy/custom type code, mapped in Hop |
 | fuel_desc | FUEL-DESC (BC) | **free text, verbatim** — mixed case and punctuation intact |
+| plate_expiry | PLATE-EXPIRY (BD) | numeric YYYYMMDD, **empty when the plate is still current** |
+
+`plate_expiry` exists because **a registration is never deleted — it expires**. The
+extract writes an empty field rather than `0` for a current plate: the contract already
+says empty = NULL, whereas a literal `0` would have to be special-cased downstream into a
+date that does not exist. Not to be confused with `DATE-ACQ` (AJ), which is when the
+vehicle was *acquired*; the legacy file had no expiry field at all and the lab adds `BD`
+with `ADADBM ADD_FIELDS`.
 
 **One row per plate, not per vehicle.** The source has nowhere to record a second
 registration plate, so a vehicle with more plates was registered again under the same

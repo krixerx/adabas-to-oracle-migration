@@ -29,6 +29,15 @@ The reverse direction (Oracle → Adabas log-based sync) lives in the sibling re
 | `scripts\seed-source.ps1` | lab data preparation only (ADADBM field add, ADAFDU file create, Natural SEEDVEH + SEEDFIN); idempotent |
 | `migrate.cmd` | full run: extract → clear → transform+load → reconcile |
 | `migrate.cmd --skip-extract` | inner loop while editing mappings; reuses the CSVs in `data\` (<1 min) |
+| `migrate.cmd --staging` | same migration, reshaped in **set-based SQL** instead of row by row. Same reconciliation, same `VERIFIED: 11/11` |
+| `scripts\watch-progress.ps1` | progress bars for a running migration, from a second window: target and staging row counts against `dataulk-expectations.json`, with a rate and an ETA. Read-only |
+| `scriptsesize-redo.ps1` | replace the image's 2 x 10 MB redo logs with 3 x 512 MB. Run once before any volume run - undersized logs stall the load AND skew the benchmark, since the two arms generate very different amounts of redo. Idempotent; lost on `down -v` |
+| `scriptseset-oracle.ps1` | drop and rebuild the POCAPP schema from `oracle-init\*.sql` in seconds, Adabas untouched. For a known state before a demo, or after an aborted run left a constraint disabled - not for speed, since `TRUNCATE` is already O(1) |
+| `scripts\setup-staging.ps1` | apply `oracle-init/03_staging.sql` to an existing lab (and recreate the oracle container if `./data` is not mounted yet). Idempotent |
+| `scripts\make-bulk-data.ps1 -Vehicles N -Fines M` | contract CSVs at any scale, plus `data\bulk-expectations.json`. **Overwrites the real extract** |
+| `scripts\benchmark.ps1` | run both techniques, reconcile each, and require identical fingerprints |
+| `scripts\fingerprint.ps1` | content hash per target table (business keys, not surrogates) |
+| `scripts\reconcile-bulk.ps1` | the same 11 checks against the generator's expectations, for volumes `Import-Csv` cannot read |
 | `docker compose run --rm hop-run` | just the Hop workflow |
 | `powershell -File scripts\reconcile.ps1` | just the verification report |
 | `hop-gui.cmd` | Hop desktop client against this project (needs `HOP_HOME`, default `C:\hop`) |
@@ -43,7 +52,9 @@ Adabas CE (file 12 VEHICLES, file 20 TRAFFINE)
   ↑ natural/SEEDVEH.NSP + SEEDFIN.NSP  (lab data prep, NOT migration — see below)
   → natural/EXTRVEH.NSP + EXTRFIN.NSP  (run headlessly via natural/run-extract.sh)
   → contract CSVs + manifest.json in data\        ← FLAT_FILE_CONTRACT.md
-  → hop/workflows/migrate-all.hwf → pipelines 10..50
+  → EITHER hop/workflows/migrate-all.hwf → pipelines 10..50        (row by row)
+    OR     hop/workflows/migrate-staging.hwf → ext_* → stg_* → hop/sql/*.sql
+                                                                  (set-based SQL)
   → Oracle POCAPP (VEHICLE, VEHICLE_PLATE, TRAFFIC_FINE + 2 children,
                    MIGRATION_REJECT, CODE_LOOKUP/VEHICLE_TYPE/VEHICLE_TYPE_MAP,
                    POWERTRAIN_TYPE/VIN_POWERTRAIN_RULE)
@@ -58,6 +69,20 @@ behind one file contract.
 
 Inside each pipeline: `CSVInput` = source fields · `SelectValues` = type conversion ·
 `DBLookup` = code resolution and parent-key resolution · `TableOutput` = column mapping.
+
+**There are two transform techniques, and they are held to the same standard.** The
+pipelines reshape row by row in a JVM; `migrate-staging.hwf` lands the files in Oracle
+unchanged (`ext_*` external tables → `stg_*`) and does the whole redesign in `hop/sql/`,
+seven set-based statements. Same source files, same target tables, same `reconcile.ps1`,
+same `VERIFIED: 11/11`. Hop orchestrates both — on the staging path it is not the
+transformation engine, which is the entire point of it existing.
+
+**When editing a mapping rule, change it in BOTH or say why not.** The de-duplication,
+the powertrain cascade, the plate resolution and the two reject reasons exist twice, once
+per technique, and `scripts/benchmark.ps1` compares content fingerprints - so a rule
+changed on one side turns into a fingerprint mismatch rather than into a silent
+divergence. That duplication is deliberate (the whole point is comparing the techniques),
+but it is duplication and it will bite anyone who forgets.
 
 **Vehicles are not 1:1 and that is the point.** The source holds one row **per plate**:
 a vehicle with several plates was registered again under the same VIN with a character
@@ -125,8 +150,22 @@ Most breakage here is a half-applied change across files that share one fact.
 - **Both DDMs are fixed-column, 53 characters per field line** — copy the spacing from an
   existing line exactly. The header name must match the *object* name (`TRAFFINE`), not
   the Adabas file name.
+- **A column in the extract, again** → the staging path needs it too:
+  `oracle-init/03_staging.sql` (the `ext_*` field list AND the `stg_*` table) +
+  `hop/sql/10_load_staging.sql`'s explicit `SELECT` list + whichever `hop/sql/` step
+  consumes it. Four files on that side, four on the pipeline side.
+- **A mapping RULE** (the VIN cut, the plate limit, a powertrain branch, a reject
+  message) → the `.hpl` **and** the matching `hop/sql/` statement. `scripts/benchmark.ps1`
+  fingerprints both results and fails on a mismatch, which is the safety net, not the
+  reminder.
+- **The generated dataset's shape** → `scripts/make-bulk-data.ps1` only, and the
+  expectations it writes are accumulated WHILE writing rather than derived afterwards.
+  Never compute them a second way: a second implementation of the rule would agree with
+  a bug in the first.
 - **A target table or column** → `oracle-init/01_schema.sql` + the pipeline + (if it is a
-  new table) `scripts/reconcile.ps1` and the DELETE order in `scripts/clear-tables.ps1`.
+  new table) `scripts/reconcile.ps1` and `hop/sql/00_clear_targets.sql` — where a new
+  table needs BOTH a `TRUNCATE` and, if an enabled FK points at it, a DISABLE/ENABLE pair.
+  That file is shared by `clear-tables.ps1` and by the opening action of BOTH workflows.
 - **Lookup seed rows** → `oracle-init/02_lookups.sql` + the `$seedRules` counts in
   `scripts/reconcile.ps1` (`CODE_LOOKUP` 13, `VEHICLE_TYPE` 6, `VEHICLE_TYPE_MAP` 9,
   `POWERTRAIN_TYPE` 5, `VIN_POWERTRAIN_RULE` 8). The
@@ -183,8 +222,15 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
   mainframe job. `migrate-all.hwf` instead opens with a `FILES_EXIST` gate that aborts
   with a usable message when the contract files are missing; do not "fix" this by adding
   a shell action.
-- **Clear with `DELETE`, child-first — never `TRUNCATE`** (ORA-02266 against enabled FKs,
-  even with empty children).
+- **Clear with `TRUNCATE`, with the four inbound FKs disabled around it** — `TRUNCATE`
+  alone raises ORA-02266 against an enabled FK even when the child is empty, which is why
+  the file used child-first `DELETE` until 2026-09-21. At 100,000 vehicles that `DELETE`
+  took **twenty minutes**: `traffic_fine.vehicle_id` had no index, so Oracle full-scanned
+  `TRAFFIC_FINE` once per deleted parent row (320 M block reads) — and scanned *empty*
+  blocks, because `DELETE` leaves the high-water mark where the last load put it.
+  `ix_traffic_fine_vehicle` now exists and the clear truncates. An unindexed foreign key
+  is invisible at lab scale and brutal at volume; check for one whenever a parent delete
+  gets slow.
 - **`ADADBM ADD_FIELDS` takes its field definitions as parameter lines** ending in
   `end_of_fields` — the `field=` keyword it also accepts answers `FDUSYN` whatever you
   give it. And **piping those parameters into `docker exec -i` from PowerShell makes
@@ -204,6 +250,62 @@ Each of these has a comment at the site explaining it; do not "clean up" the com
   `.fdt`/`.fdu` at LF (they execute inside Linux containers; Natural source and DDMs are
   column-sensitive) and `.cmd`/`.ps1` at CRLF. A CRLF shell script fails with a confusing
   "command not found".
+- **A CRLF contract file breaks the external-table load, and does it quietly.**
+  ORACLE_LOADER terminates records on a bare linefeed and leaves the carriage return
+  attached to the LAST field, so a CSV written on Windows loads most of its rows and
+  rejects exactly the ones whose final column is already at its declared width
+  (`plate_expiry` = `20200101` becomes nine characters). `make-bulk-data.ps1` forces
+  `$sw.NewLine = "`n"`; the real extract writes LF because it runs inside Linux.
+- **`INSERT /*+ APPEND */` is silently ignored on a table with enabled foreign keys.**
+  The hint is left in `hop/sql/20_vehicle.sql` deliberately, with a comment: a full-volume
+  load disables the FKs, loads direct-path, then re-enables with NOVALIDATE. Do not read
+  the hint as proof that direct path is happening.
+- **`oracle-init/` runs only on a container's FIRST start** — that already applied to the
+  schema, and now applies to the staging layer too. `scripts/setup-staging.ps1` applies
+  the same file to an existing lab, and `migrate.cmd --staging` calls it every time.
+- **Oracle has to be able to READ `data/`.** The external tables need the
+  `./data:/opt/oracle/a2o-data:ro` mount, and adding it means the oracle container is
+  RECREATED (not rebuilt - the datafiles are in a named volume and survive).
+  `setup-staging.ps1` detects the missing mount and does it.
+- **Hop's SQL action can read from a file, and should.** `sqlFromFile=Y` +
+  `sqlFilename=${PROJECT_HOME}/sql/x.sql` keeps the SQL versioned and readable instead of
+  buried in workflow XML - and `${PROJECT_HOME}` is why `sql/` lives under `hop/`: the
+  container mounts `./hop`, so a top-level `sql/` would be invisible to it. Script mode
+  (`sendOneStatement=N`) handles `--` comments and `/*+ hints */` correctly; that was
+  tested, not assumed.
+- **In PowerShell, `docker compose … 2>&1` under `$ErrorActionPreference = "Stop"` is a
+  TERMINATING error**, because compose writes progress to stderr. `benchmark.ps1` wraps
+  native calls in `Invoke-Native`, which relaxes the preference and judges success on the
+  exit code. Anything piping a native command's stderr needs the same treatment.
+- **Piping a here-string into `sqlplus` sends a UTF-8 BOM**, which sqlplus reports as
+  SP2-0734 against whatever is on line 1. Set `$OutputEncoding` and start the script with
+  a blank line so the BOM lands somewhere harmless.
+- **A workflow run from the Hop GUI does not get `migrate.cmd`'s other steps.** That is
+  obvious in hindsight and cost a confusing failure: with the target tables still holding
+  the previous run, the first insert dies with `ORA-00001: unique constraint
+  (POCAPP.UQ_VEHICLE_ISN) violated`, which reads like a data problem and is not one. Both
+  workflows therefore open with a `00 clear targets` SQL action running
+  `hop/sql/00_clear_targets.sql`, so each one is a complete, re-runnable unit;
+  `migrate.cmd` still calls `clear-tables.ps1` first, which is then a no-op. If you add a
+  step that a workflow depends on, put it IN the workflow, not only in the wrapper.
+- **A `DBLookup` with "load all data from table" preloads the WHOLE table into the JVM.**
+  Right for `CODE_LOOKUP` (13 rows), fatal for a migrated table: at 2.5 M fines
+  `resolve fine_id` died in `DatabaseLookup.loadAllTableDataIntoTheCache` with
+  `OutOfMemoryError`, because it clones the row metadata per cached row — and
+  `hop-run.sh` hardcodes `-Xmx2048m` whatever the host has. The four lookups that read
+  a migrated table now do indexed per-row lookups with a bounded cache; the four that
+  read a lookup table still preload. If you add a lookup, decide which kind it is.
+- **`sort_size` is rows held in RAM before spilling**, not a buffer hint. 1,000,000 was
+  "never spill" at lab scale and a promise the heap could not keep at 1.12 M rows.
+- **A PowerShell function returning a one-element array hands back a bare string.**
+  `(Invoke-Sql ...)[0]` then indexes into the *string* and returns its first
+  CHARACTER, which parses as a number and looks entirely plausible - `resize-redo.ps1`
+  read "group 0, directory nothing" and the first thing that noticed was Oracle
+  refusing to add a logfile group 1 that already existed. Wrap the call site in `@(...)`,
+  not just the return.
+- **`Sort-Object <key>` does not work on a hashtable, and PowerShell's sort is not
+  stable.** `benchmark.ps1` used it to pick the faster arm and named the SLOWER one when
+  the two were close (49.8 s vs 51.0 s). Compare explicitly, or use `PSCustomObject`.
 - **Ports 60001, 8190, 2700, 1521** collide with the sibling `oracle-to-adabas-sync` lab.
   One at a time.
 

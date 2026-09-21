@@ -12,6 +12,16 @@ scripts\lab-up.ps1
 migrate.cmd
 ```
 
+> **There is a second way to run the same migration.** `migrate.cmd --staging` lands the
+> contract CSVs in Oracle unchanged (external tables → `stg_*`) and does the whole
+> structural redesign in set-based SQL (`hop\sql\`), instead of reshaping row by row
+> through the pipelines. Same source files, same target tables, same
+> `VERIFIED: 11/11` — only the technique differs. Everything in this guide describes the
+> row-by-row path, which is the one worth learning first because you can watch it happen
+> a record at a time. Once it makes sense, read `hop\sql\20_vehicle.sql` beside
+> `hop\pipelines\10_vehicle.hpl`: they are the same rule written twice, and
+> `scripts\benchmark.ps1` proves it by requiring identical output from both.
+
 Prerequisites: **Docker Desktop must be running** (all images were already pulled;
 no internet needed), and the lab must have been brought up with `scripts\lab-up.ps1`
 at least once since the last `docker compose down -v`.

@@ -54,6 +54,12 @@ services:
     volumes:
       - oracle-data:/opt/oracle/oradata
       - ./oracle-init:/container-entrypoint-initdb.d:ro
+      # The contract CSVs, readable by the database itself. This is what lets the
+      # staging path read them as EXTERNAL TABLES - Oracle parses the file in
+      # place, with no client in the middle and no second copy on disk. Read-only
+      # on purpose: the database consumes the extract, it never writes to it,
+      # which is also why the external tables declare NOLOGFILE/NOBADFILE.
+      - ./data:/opt/oracle/a2o-data:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 15s
@@ -75,6 +81,12 @@ services:
       HOP_FILE_PATH: ${HOP_FILE_PATH:-/poc/hop/workflows/migrate-all.hwf}
       HOP_RUN_CONFIG: local
       HOP_LOG_LEVEL: Basic
+      # hop-run.sh HARDCODES -Xmx2048m when HOP_OPTIONS is unset, so the JVM gets 2 GB
+      # no matter how much the Docker VM has. That is what the row-by-row arm ran out of
+      # at 11 M source rows (2026-09-21). More heap is not the fix - not preloading whole
+      # tables into a lookup cache is - but the arm sorts 1.12 M rows and buffers row sets,
+      # so 2 GB is tight even when nothing is doing anything silly.
+      HOP_OPTIONS: -Xmx4096m
       # ${ORACLE_HOST} in the connection metadata is supplied by a Hop ENVIRONMENT, not by
       # an OS variable and not by a project variable:
       #   - a plain OS env var is NOT picked up as a Hop variable in this image - it stays
